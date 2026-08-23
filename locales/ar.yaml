@@ -275,6 +275,16 @@ gateway:
     title_error_untitled:  "\n⚠️ {error} — بدأت الجلسة دون عنوان."
     title_empty_untitled:  "\n⚠️ العنوان فارغ بعد التنظيف — بدأت الجلسة دون عنوان."
     tip:                   "\n✦ نصيحة: {tip}"
+    auto_notice:           "◐ بدأت جلسة جديدة تلقائيًا ({reason}).\n\nلم تعد الجلسة السابقة ضمن السياق النشط، لكنها ما زالت محفوظة في السجل.\nاستخدم /resume لتصفحها أو استعادتها.\nعدّل توقيت إعادة الضبط ضمن session_reset في config.yaml."
+    auto_reason_suspended: "توقفت الجلسة السابقة أو انقطعت"
+    auto_reason_recovery_timeout: "انتهت مهلة الاستعادة بعد إعادة تشغيل البوابة"
+    auto_reason_daily:     "الجدول اليومي عند {hour}:00"
+    auto_reason_idle:      "عدم نشاط لمدة {duration}"
+    session_info:          "◆ النموذج: `{model}`\n◆ المزوّد: {provider}\n◆ السياق: {context} رمزًا ({source})"
+    session_info_endpoint: "◆ نقطة النهاية: {endpoint}"
+    context_source_config: "الإعدادات"
+    context_source_default: "الافتراضي — عيّن model.context_length في الإعدادات للتجاوز"
+    context_source_detected: "مكتشف"
 
   restart:
     in_progress:           "⏳ إعادة تشغيل البوابة قيد التنفيذ بالفعل..."

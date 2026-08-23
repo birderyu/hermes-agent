@@ -256,6 +256,16 @@ gateway:
     title_error_untitled:  "\n⚠️ {error} — seisiún tosaithe gan teideal."
     title_empty_untitled:  "\n⚠️ Tá an teideal folamh tar éis glanta — seisiún tosaithe gan teideal."
     tip:                   "\n✦ Leid: {tip}"
+    auto_notice:           "◐ Tosaíodh seisiún nua go huathoibríoch ({reason}).\n\nNíl an seisiún roimhe seo sa chomhthéacs gníomhach a thuilleadh, ach tá sé sábháilte sa stair fós.\nÚsáid /resume chun é a bhrabhsáil nó a athchóiriú.\nCoigeartaigh am an athshocraithe faoi session_reset in config.yaml."
+    auto_reason_suspended: "stopadh nó cuireadh isteach ar an seisiún roimhe seo"
+    auto_reason_recovery_timeout: "chuaigh athshlánú tar éis atosú an gateway thar am"
+    auto_reason_daily:     "sceideal laethúil ag {hour}:00"
+    auto_reason_idle:      "neamhghníomhach ar feadh {duration}"
+    session_info:          "◆ Samhail: `{model}`\n◆ Soláthraí: {provider}\n◆ Comhthéacs: {context} comhartha ({source})"
+    session_info_endpoint: "◆ Críochphointe: {endpoint}"
+    context_source_config: "cumraíocht"
+    context_source_default: "réamhshocrú — socraigh model.context_length sa chumraíocht lena shárú"
+    context_source_detected: "braite"
 
   restart:
     in_progress:           "⏳ Tá atosú gateway ar siúl cheana féin..."

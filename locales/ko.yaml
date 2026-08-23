@@ -252,6 +252,16 @@ gateway:
     title_error_untitled:  "\n⚠️ {error} — 제목 없이 세션을 시작했습니다."
     title_empty_untitled:  "\n⚠️ 정리 후 제목이 비어 있습니다 — 제목 없이 세션을 시작했습니다."
     tip:                   "\n✦ 팁: {tip}"
+    auto_notice:           "◐ 새 세션이 자동으로 시작되었습니다({reason}).\n\n이전 세션은 더 이상 활성 컨텍스트에 없지만 기록에는 계속 저장됩니다.\n탐색하거나 복원하려면 /resume을 사용하세요.\nconfig.yaml의 session_reset에서 초기화 시간을 조정하세요."
+    auto_reason_suspended: "이전 세션이 중지되었거나 중단됨"
+    auto_reason_recovery_timeout: "게이트웨이 재시작 후 복구 시간 초과"
+    auto_reason_daily:     "매일 {hour}:00 일정"
+    auto_reason_idle:      "{duration} 동안 비활성"
+    session_info:          "◆ 모델: `{model}`\n◆ 제공자: {provider}\n◆ 컨텍스트: {context} 토큰({source})"
+    session_info_endpoint: "◆ 엔드포인트: {endpoint}"
+    context_source_config: "설정"
+    context_source_default: "기본값 — 덮어쓰려면 설정에서 model.context_length 지정"
+    context_source_detected: "감지됨"
 
   restart:
     in_progress:           "⏳ 게이트웨이 재시작이 이미 진행 중입니다..."

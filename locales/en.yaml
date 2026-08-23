@@ -267,6 +267,16 @@ gateway:
     title_error_untitled:  "\n⚠️ {error} — session started untitled."
     title_empty_untitled:  "\n⚠️ Title is empty after cleanup — session started untitled."
     tip:                   "\n✦ Tip: {tip}"
+    auto_notice:           "◐ A new session was started automatically ({reason}).\n\nThe previous session is no longer in the active context, but remains saved in history.\nUse /resume to browse or restore it.\nAdjust reset timing under session_reset in config.yaml."
+    auto_reason_suspended: "the previous session was stopped or interrupted"
+    auto_reason_recovery_timeout: "gateway restart recovery timed out"
+    auto_reason_daily:     "daily schedule at {hour}:00"
+    auto_reason_idle:      "inactive for {duration}"
+    session_info:          "◆ Model: `{model}`\n◆ Provider: {provider}\n◆ Context: {context} tokens ({source})"
+    session_info_endpoint: "◆ Endpoint: {endpoint}"
+    context_source_config: "config"
+    context_source_default: "default — set model.context_length in config to override"
+    context_source_detected: "detected"
 
   restart:
     in_progress:           "⏳ Gateway restart already in progress..."

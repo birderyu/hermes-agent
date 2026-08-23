@@ -252,6 +252,16 @@ gateway:
     title_error_untitled:  "\n⚠️ {error} — sessie sonder titel begin."
     title_empty_untitled:  "\n⚠️ Titel is leeg na opruiming — sessie sonder titel begin."
     tip:                   "\n✦ Wenk: {tip}"
+    auto_notice:           "◐ 'n Nuwe sessie is outomaties begin ({reason}).\n\nDie vorige sessie is nie meer in die aktiewe konteks nie, maar bly in die geskiedenis gestoor.\nGebruik /resume om dit te blaai of te herstel.\nPas die hersteltyd onder session_reset in config.yaml aan."
+    auto_reason_suspended: "die vorige sessie is gestop of onderbreek"
+    auto_reason_recovery_timeout: "herstel ná gateway-herbegin het uitgetel"
+    auto_reason_daily:     "daaglikse skedule om {hour}:00"
+    auto_reason_idle:      "onaktief vir {duration}"
+    session_info:          "◆ Model: `{model}`\n◆ Verskaffer: {provider}\n◆ Konteks: {context} tokens ({source})"
+    session_info_endpoint: "◆ Eindpunt: {endpoint}"
+    context_source_config: "konfigurasie"
+    context_source_default: "verstek — stel model.context_length in die konfigurasie om te oorskryf"
+    context_source_detected: "bespeur"
 
   restart:
     in_progress:           "⏳ Gateway-herbegin reeds aan die gang..."

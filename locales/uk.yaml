@@ -252,6 +252,16 @@ gateway:
     title_error_untitled:  "\n⚠️ {error} — сесію запущено без назви."
     title_empty_untitled:  "\n⚠️ Після очищення назва порожня — сесію запущено без назви."
     tip:                   "\n✦ Порада: {tip}"
+    auto_notice:           "◐ Нову сесію запущено автоматично ({reason}).\n\nПопередня сесія більше не входить до активного контексту, але залишається збереженою в історії.\nСкористайтеся /resume, щоб переглянути або відновити її.\nНалаштуйте час скидання в session_reset файлу config.yaml."
+    auto_reason_suspended: "попередню сесію зупинено або перервано"
+    auto_reason_recovery_timeout: "відновлення після перезапуску шлюзу вичерпало час"
+    auto_reason_daily:     "щоденний розклад о {hour}:00"
+    auto_reason_idle:      "неактивна протягом {duration}"
+    session_info:          "◆ Модель: `{model}`\n◆ Провайдер: {provider}\n◆ Контекст: {context} токенів ({source})"
+    session_info_endpoint: "◆ Кінцева точка: {endpoint}"
+    context_source_config: "конфігурація"
+    context_source_default: "за замовчуванням — вкажіть model.context_length у конфігурації для перевизначення"
+    context_source_detected: "визначено"
 
   restart:
     in_progress:           "⏳ Перезапуск гейтвея вже виконується..."

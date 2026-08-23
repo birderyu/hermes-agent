@@ -252,6 +252,16 @@ gateway:
     title_error_untitled:  "\n⚠️ {error} — 工作階段以未命名方式啟動。"
     title_empty_untitled:  "\n⚠️ 清理後標題為空 — 工作階段以未命名方式啟動。"
     tip:                   "\n✦ 提示：{tip}"
+    auto_notice:           "◐ 已自動開啟新工作階段（原因：{reason}）。\n\n上一個工作階段已離開目前上下文，但仍儲存在歷史記錄中。\n如需瀏覽或還原，請使用 /resume。\n如需調整重設時間，請修改 config.yaml 中的 session_reset。"
+    auto_reason_suspended: "上一個工作階段被停止或中斷"
+    auto_reason_recovery_timeout: "閘道重啟後還原逾時"
+    auto_reason_daily:     "每日 {hour}:00 定時重設"
+    auto_reason_idle:      "已閒置 {duration}"
+    session_info:          "◆ 模型：`{model}`\n◆ 提供方：{provider}\n◆ 上下文：{context} tokens（{source}）"
+    session_info_endpoint: "◆ 接入地址：{endpoint}"
+    context_source_config: "設定指定"
+    context_source_default: "預設值 — 可在 config.yaml 中設定 model.context_length"
+    context_source_detected: "自動偵測"
 
   restart:
     in_progress:           "⏳ 閘道重新啟動已在進行中……"

@@ -252,6 +252,16 @@ gateway:
     title_error_untitled:  "\n⚠️ {error} — Sitzung ohne Titel gestartet."
     title_empty_untitled:  "\n⚠️ Titel ist nach Bereinigung leer — Sitzung ohne Titel gestartet."
     tip:                   "\n✦ Tipp: {tip}"
+    auto_notice:           "◐ Eine neue Sitzung wurde automatisch gestartet ({reason}).\n\nDie vorherige Sitzung befindet sich nicht mehr im aktiven Kontext, bleibt aber im Verlauf gespeichert.\nMit /resume können Sie sie durchsuchen oder wiederherstellen.\nPassen Sie den Rücksetzzeitpunkt unter session_reset in config.yaml an."
+    auto_reason_suspended: "die vorherige Sitzung wurde gestoppt oder unterbrochen"
+    auto_reason_recovery_timeout: "Zeitüberschreitung bei der Wiederherstellung nach Gateway-Neustart"
+    auto_reason_daily:     "täglicher Zeitplan um {hour}:00"
+    auto_reason_idle:      "seit {duration} inaktiv"
+    session_info:          "◆ Modell: `{model}`\n◆ Anbieter: {provider}\n◆ Kontext: {context} Tokens ({source})"
+    session_info_endpoint: "◆ Endpunkt: {endpoint}"
+    context_source_config: "Konfiguration"
+    context_source_default: "Standard — zum Überschreiben model.context_length in der Konfiguration festlegen"
+    context_source_detected: "erkannt"
 
   restart:
     in_progress:           "⏳ Gateway-Neustart läuft bereits..."

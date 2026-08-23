@@ -252,6 +252,16 @@ gateway:
     title_error_untitled:  "\n⚠️ {error} — 会话以未命名方式启动。"
     title_empty_untitled:  "\n⚠️ 清理后标题为空 — 会话以未命名方式启动。"
     tip:                   "\n✦ 提示：{tip}"
+    auto_notice:           "◐ 已自动开启新会话（原因：{reason}）。\n\n上一会话已退出当前上下文，但仍保存在历史记录中。\n如需浏览或恢复，请使用 /resume。\n如需调整重置时间，请修改 config.yaml 中的 session_reset。"
+    auto_reason_suspended: "上一会话被停止或中断"
+    auto_reason_recovery_timeout: "网关重启后恢复超时"
+    auto_reason_daily:     "每日 {hour}:00 定时重置"
+    auto_reason_idle:      "已闲置 {duration}"
+    session_info:          "◆ 模型：`{model}`\n◆ 提供方：{provider}\n◆ 上下文：{context} tokens（{source}）"
+    session_info_endpoint: "◆ 接入地址：{endpoint}"
+    context_source_config: "配置指定"
+    context_source_default: "默认值 — 可在 config.yaml 中设置 model.context_length"
+    context_source_detected: "自动检测"
 
   restart:
     in_progress:           "⏳ 网关重启已在进行中……"

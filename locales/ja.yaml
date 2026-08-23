@@ -252,6 +252,16 @@ gateway:
     title_error_untitled:  "\n⚠️ {error} — タイトルなしでセッションを開始しました。"
     title_empty_untitled:  "\n⚠️ クリーンアップ後にタイトルが空になりました — タイトルなしでセッションを開始しました。"
     tip:                   "\n✦ ヒント: {tip}"
+    auto_notice:           "◐ 新しいセッションが自動的に開始されました（{reason}）。\n\n前のセッションはアクティブなコンテキストから外れましたが、履歴には保存されています。\n閲覧または復元するには /resume を使用してください。\nリセット時刻は config.yaml の session_reset で調整できます。"
+    auto_reason_suspended: "前のセッションが停止または中断された"
+    auto_reason_recovery_timeout: "ゲートウェイ再起動後の復旧がタイムアウトした"
+    auto_reason_daily:     "毎日 {hour}:00 のスケジュール"
+    auto_reason_idle:      "{duration} 間非アクティブ"
+    session_info:          "◆ モデル: `{model}`\n◆ プロバイダー: {provider}\n◆ コンテキスト: {context} トークン（{source}）"
+    session_info_endpoint: "◆ エンドポイント: {endpoint}"
+    context_source_config: "設定"
+    context_source_default: "デフォルト — 上書きするには設定で model.context_length を指定"
+    context_source_detected: "検出済み"
 
   restart:
     in_progress:           "⏳ ゲートウェイの再起動はすでに進行中です..."

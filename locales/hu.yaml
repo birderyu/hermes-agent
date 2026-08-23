@@ -252,6 +252,16 @@ gateway:
     title_error_untitled:  "\n⚠️ {error} — a munkamenet cím nélkül indult."
     title_empty_untitled:  "\n⚠️ Tisztítás után a cím üres — a munkamenet cím nélkül indult."
     tip:                   "\n✦ Tipp: {tip}"
+    auto_notice:           "◐ Automatikusan új munkamenet indult ({reason}).\n\nAz előző munkamenet már nincs az aktív kontextusban, de az előzményekben továbbra is megmarad.\nA /resume paranccsal tallózhatja vagy visszaállíthatja.\nA visszaállítás idejét a config.yaml session_reset részében módosíthatja."
+    auto_reason_suspended: "az előző munkamenetet leállították vagy megszakították"
+    auto_reason_recovery_timeout: "az átjáró újraindítása utáni helyreállítás időtúllépést ért el"
+    auto_reason_daily:     "napi ütemezés {hour}:00-kor"
+    auto_reason_idle:      "{duration} ideje inaktív"
+    session_info:          "◆ Modell: `{model}`\n◆ Szolgáltató: {provider}\n◆ Kontextus: {context} token ({source})"
+    session_info_endpoint: "◆ Végpont: {endpoint}"
+    context_source_config: "konfiguráció"
+    context_source_default: "alapértelmezett — felülíráshoz állítsa be a model.context_length értékét"
+    context_source_detected: "észlelve"
 
   restart:
     in_progress:           "⏳ Az átjáró újraindítása már folyamatban van..."

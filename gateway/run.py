@@ -20685,23 +20685,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 if should_notify:
                     adapter = self._adapter_for_source(source)
                     if adapter:
-                        if reset_reason == "suspended":
-                            reason_text = "previous session was stopped or interrupted"
-                        elif reset_reason == "resume_pending_expired":
-                            reason_text = "gateway restart recovery timed out"
-                        elif reset_reason == "daily":
-                            reason_text = f"daily schedule at {policy.at_hour}:00"
-                        else:
-                            hours = policy.idle_minutes // 60
-                            mins = policy.idle_minutes % 60
-                            duration = f"{hours}h" if not mins else f"{hours}h {mins}m" if hours else f"{mins}m"
-                            reason_text = f"inactive for {duration}"
-                        notice = (
-                            f"◐ Session automatically reset ({reason_text}). "
-                            f"Conversation history cleared.\n"
-                            f"Use /resume to browse and restore a previous session.\n"
-                            f"Adjust reset timing in config.yaml under session_reset."
-                        )
+                        notice = self._format_auto_reset_notice(reset_reason, policy)
                         try:
                             session_info = await asyncio.to_thread(
                                 self._reset_notice_session_info, source
@@ -22921,6 +22905,33 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             # Restore session context variables to their pre-handler state
             self._clear_session_env(_session_env_tokens)
 
+    def _format_auto_reset_notice(self, reset_reason: str, policy: Any) -> str:
+        """Return a localized, history-accurate automatic-reset notice."""
+        if reset_reason == "suspended":
+            reason_text = t("gateway.reset.auto_reason_suspended")
+        elif reset_reason == "resume_pending_expired":
+            reason_text = t("gateway.reset.auto_reason_recovery_timeout")
+        elif reset_reason == "daily":
+            reason_text = t(
+                "gateway.reset.auto_reason_daily",
+                hour=f"{policy.at_hour:02d}",
+            )
+        else:
+            hours = policy.idle_minutes // 60
+            mins = policy.idle_minutes % 60
+            duration = (
+                f"{hours}h"
+                if not mins
+                else f"{hours}h {mins}m"
+                if hours
+                else f"{mins}m"
+            )
+            reason_text = t(
+                "gateway.reset.auto_reason_idle",
+                duration=duration,
+            )
+        return t("gateway.reset.auto_notice", reason=reason_text)
+
     def _reset_notice_session_info(self, source: SessionSource) -> str:
         """Session-info block for the auto-reset notice, profile-scoped.
 
@@ -22955,12 +22966,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         context_length = resolved.context_length
 
         # Format context source hint
-        if resolved.context_source == "config":
-            ctx_source = "config"
-        elif resolved.context_source == "default":
-            ctx_source = "default — set model.context_length in config to override"
-        else:
-            ctx_source = "detected"
+        ctx_source = t(
+            f"gateway.reset.context_source_{resolved.context_source}"
+            if resolved.context_source in {"config", "default"}
+            else "gateway.reset.context_source_detected"
+        )
 
         # Format context length for display
         if context_length >= 1_000_000:
@@ -22971,14 +22981,18 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             ctx_display = str(context_length)
 
         lines = [
-            f"◆ Model: `{model}`",
-            f"◆ Provider: {provider or 'openrouter'}",
-            f"◆ Context: {ctx_display} tokens ({ctx_source})",
+            t(
+                "gateway.reset.session_info",
+                model=model,
+                provider=provider or "openrouter",
+                context=ctx_display,
+                source=ctx_source,
+            )
         ]
 
         # Show endpoint for local/custom setups
         if base_url and base_url_hostname(base_url) in ("localhost", "127.0.0.1", "0.0.0.0"):
-            lines.append(f"◆ Endpoint: {base_url}")
+            lines.append(t("gateway.reset.session_info_endpoint", endpoint=base_url))
 
         return "\n".join(lines)
 

@@ -252,6 +252,16 @@ gateway:
     title_error_untitled:  "\n⚠️ {error} — oturum başlıksız başlatıldı."
     title_empty_untitled:  "\n⚠️ Temizlik sonrası başlık boş — oturum başlıksız başlatıldı."
     tip:                   "\n✦ İpucu: {tip}"
+    auto_notice:           "◐ Yeni bir oturum otomatik olarak başlatıldı ({reason}).\n\nÖnceki oturum artık etkin bağlamda değil, ancak geçmişte kayıtlı kalır.\nGözatmak veya geri yüklemek için /resume kullanın.\nSıfırlama zamanını config.yaml içindeki session_reset altında ayarlayın."
+    auto_reason_suspended: "önceki oturum durduruldu veya kesintiye uğradı"
+    auto_reason_recovery_timeout: "gateway yeniden başlatma kurtarması zaman aşımına uğradı"
+    auto_reason_daily:     "günlük zamanlama {hour}:00"
+    auto_reason_idle:      "{duration} boyunca etkin değil"
+    session_info:          "◆ Model: `{model}`\n◆ Sağlayıcı: {provider}\n◆ Bağlam: {context} token ({source})"
+    session_info_endpoint: "◆ Uç nokta: {endpoint}"
+    context_source_config: "yapılandırma"
+    context_source_default: "varsayılan — geçersiz kılmak için yapılandırmada model.context_length ayarlayın"
+    context_source_detected: "algılandı"
 
   restart:
     in_progress:           "⏳ Gateway yeniden başlatma zaten sürüyor..."

@@ -252,6 +252,16 @@ gateway:
     title_error_untitled:  "\n⚠️ {error} — сеанс запущен без названия."
     title_empty_untitled:  "\n⚠️ После очистки название пусто — сеанс запущен без названия."
     tip:                   "\n✦ Совет: {tip}"
+    auto_notice:           "◐ Новый сеанс запущен автоматически ({reason}).\n\nПредыдущий сеанс больше не входит в активный контекст, но сохранён в истории.\nИспользуйте /resume, чтобы просмотреть или восстановить его.\nНастройте время сброса в session_reset файла config.yaml."
+    auto_reason_suspended: "предыдущий сеанс был остановлен или прерван"
+    auto_reason_recovery_timeout: "истекло время восстановления после перезапуска шлюза"
+    auto_reason_daily:     "ежедневное расписание на {hour}:00"
+    auto_reason_idle:      "неактивен {duration}"
+    session_info:          "◆ Модель: `{model}`\n◆ Провайдер: {provider}\n◆ Контекст: {context} токенов ({source})"
+    session_info_endpoint: "◆ Конечная точка: {endpoint}"
+    context_source_config: "конфигурация"
+    context_source_default: "по умолчанию — задайте model.context_length в конфигурации для переопределения"
+    context_source_detected: "определено"
 
   restart:
     in_progress:           "⏳ Перезапуск шлюза уже выполняется..."

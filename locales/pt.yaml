@@ -252,6 +252,16 @@ gateway:
     title_error_untitled:  "\n⚠️ {error} — sessão iniciada sem título."
     title_empty_untitled:  "\n⚠️ O título fica vazio após a limpeza — sessão iniciada sem título."
     tip:                   "\n✦ Dica: {tip}"
+    auto_notice:           "◐ Foi iniciada automaticamente uma nova sessão ({reason}).\n\nA sessão anterior já não está no contexto ativo, mas continua guardada no histórico.\nUsa /resume para a consultar ou restaurar.\nAjusta o horário de reinício em session_reset no config.yaml."
+    auto_reason_suspended: "a sessão anterior foi parada ou interrompida"
+    auto_reason_recovery_timeout: "a recuperação após reiniciar o gateway expirou"
+    auto_reason_daily:     "agendamento diário às {hour}:00"
+    auto_reason_idle:      "inativa durante {duration}"
+    session_info:          "◆ Modelo: `{model}`\n◆ Fornecedor: {provider}\n◆ Contexto: {context} tokens ({source})"
+    session_info_endpoint: "◆ Endpoint: {endpoint}"
+    context_source_config: "configuração"
+    context_source_default: "predefinido — define model.context_length na configuração para substituir"
+    context_source_detected: "detetado"
 
   restart:
     in_progress:           "⏳ O reinício do gateway já está em curso..."
