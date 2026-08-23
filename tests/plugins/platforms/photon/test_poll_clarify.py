@@ -7,9 +7,10 @@ both directions without spawning the Node sidecar or binding ports:
 
   * outbound — ``send_clarify`` with choices POSTs ``/send-poll`` and flips the
     clarify into text-capture mode; with no choices it stays plain text;
-  * inbound — a ``poll_option`` selection is dispatched as a plain-text message
-    carrying the chosen option (so the gateway clarify-intercept resolves it),
-    a deselection is dropped, and an empty-title vote is dropped.
+  * inbound — the first ``poll_option`` selection per sender for a poll Hermes
+    sent is dispatched as plain text (so the gateway clarify-intercept resolves
+    it); later changes, stale/untracked polls, deselections, and empty choices
+    are dropped.
 """
 from __future__ import annotations
 
@@ -42,13 +43,18 @@ def _capture(
 
 
 def _poll_option_event(
-    *, title: str, selected: bool = True, msg_id: str = "spc-msg-vote"
+    *,
+    title: str,
+    selected: bool = True,
+    poll_id: str = "spc-msg-poll",
+    event_suffix: str = "vote-1",
+    sender_id: str = "+155****4567",
 ) -> Dict[str, Any]:
     return {
-        "messageId": msg_id,
+        "messageId": f"{poll_id}:{sender_id}:option:{event_suffix}",
         "platform": "iMessage",
         "space": {"id": "+155****4567", "type": "dm", "phone": "+155****4567"},
-        "sender": {"id": "+155****4567"},
+        "sender": {"id": sender_id},
         "content": {
             "type": "poll_option",
             "title": title,
@@ -71,6 +77,7 @@ async def test_poll_vote_dispatched_as_choice_text(
     chosen option, so the gateway clarify text-intercept can resolve it."""
     adapter = _make_adapter(monkeypatch)
     captured = _capture(adapter, monkeypatch)
+    adapter._record_sent_message("spc-msg-poll")
 
     await adapter._dispatch_inbound(
         _poll_option_event(title="Yes — native tappable buttons")
@@ -81,6 +88,82 @@ async def test_poll_vote_dispatched_as_choice_text(
     assert ev.text == "Yes — native tappable buttons"
     assert ev.message_type == MessageType.TEXT
     assert ev.source.chat_id == "+155****4567"
+
+
+@pytest.mark.asyncio
+async def test_poll_vote_change_after_first_selection_is_dropped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Changing an iMessage vote must not create a second Hermes turn."""
+    adapter = _make_adapter(monkeypatch)
+    captured = _capture(adapter, monkeypatch)
+    adapter._record_sent_message("spc-msg-poll")
+
+    await adapter._dispatch_inbound(
+        _poll_option_event(title="Cancel", event_suffix="vote-1")
+    )
+    await adapter._dispatch_inbound(
+        _poll_option_event(title="Proceed", event_suffix="vote-2")
+    )
+
+    assert [event.text for event in captured] == ["Cancel"]
+
+
+@pytest.mark.asyncio
+async def test_group_poll_allows_one_first_vote_per_sender(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = _make_adapter(monkeypatch)
+    captured = _capture(adapter, monkeypatch)
+    adapter._record_sent_message("spc-msg-poll")
+
+    first = _poll_option_event(title="A", sender_id="user-a")
+    second = _poll_option_event(
+        title="B", sender_id="user-b", event_suffix="vote-2"
+    )
+    first["space"] = {"id": "group-1", "type": "group", "phone": "+155****4567"}
+    second["space"] = first["space"]
+
+    await adapter._dispatch_inbound(first)
+    await adapter._dispatch_inbound(second)
+
+    assert [event.text for event in captured] == ["A", "B"]
+
+
+@pytest.mark.asyncio
+async def test_untracked_poll_vote_is_dropped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Old polls cannot answer a later clarify after an adapter restart."""
+    adapter = _make_adapter(monkeypatch)
+    captured = _capture(adapter, monkeypatch)
+
+    await adapter._dispatch_inbound(
+        _poll_option_event(title="Proceed", poll_id="old-poll")
+    )
+
+    assert captured == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("title", "selected"),
+    [("Proceed", False), ("", True)],
+)
+async def test_poll_deselection_and_empty_choice_are_dropped(
+    monkeypatch: pytest.MonkeyPatch,
+    title: str,
+    selected: bool,
+) -> None:
+    adapter = _make_adapter(monkeypatch)
+    captured = _capture(adapter, monkeypatch)
+    adapter._record_sent_message("spc-msg-poll")
+
+    await adapter._dispatch_inbound(
+        _poll_option_event(title=title, selected=selected)
+    )
+
+    assert captured == []
 
 
 # ---------------------------------------------------------------------------
@@ -145,5 +228,3 @@ async def test_send_clarify_with_choices_sends_native_poll(
     assert options == ["A", "B", "C"]
     # The vote returns as text, so text-capture must be enabled.
     assert marked == ["clar-1"]
-
-

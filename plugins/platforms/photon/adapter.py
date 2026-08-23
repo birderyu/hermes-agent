@@ -859,6 +859,12 @@ class PhotonAdapter(BasePlatformAdapter):
         # reaction events are only routed to the agent when they target one of
         # these — a tapback on a human↔human message is not addressed to us.
         self._sent_message_ids: Dict[str, float] = {}
+        # First-vote-wins guard for native polls we sent. Spectrum surfaces a
+        # fresh ``poll_option`` message whenever a participant changes their
+        # vote; without this guard a post-clarify change becomes an unrelated
+        # user turn. Keys are ``(poll message id, sender id)`` so group-chat
+        # participants may each answer once while a DM user cannot re-answer.
+        self._consumed_poll_voters: Dict[tuple[str, str], float] = {}
         # Latest inbound message id per chat (bounded). Lets the agent-facing
         # react action default to "the message that triggered me" without
         # requiring the model to thread message ids through tool calls.
@@ -1428,6 +1434,17 @@ class PhotonAdapter(BasePlatformAdapter):
             choice = (content.get("title") or "").strip()
             if not choice:
                 logger.debug("[photon] ignoring poll vote with empty title")
+                return
+            poll_message_id = self._poll_parent_message_id(
+                event.get("messageId"), content
+            )
+            if not self._claim_first_poll_vote(poll_message_id, sender_id):
+                logger.debug(
+                    "[photon] ignoring untracked or repeated poll vote "
+                    "(poll=%s, sender=%s)",
+                    poll_message_id,
+                    sender_id,
+                )
                 return
             source = self.build_source(
                 chat_id=space_id,
@@ -2251,6 +2268,7 @@ class PhotonAdapter(BasePlatformAdapter):
 
     _SENT_IDS_MAX = 1000
     _LAST_INBOUND_CHATS_MAX = 200
+    _POLL_VOTERS_MAX = 1000
 
     def _record_sent_message(self, message_id: Optional[str]) -> None:
         if not message_id:
@@ -2262,6 +2280,46 @@ class PhotonAdapter(BasePlatformAdapter):
         if len(sent) > self._SENT_IDS_MAX:
             for old in list(sent.keys())[: len(sent) - self._SENT_IDS_MAX]:
                 del sent[old]
+
+    @staticmethod
+    def _poll_parent_message_id(
+        event_message_id: Optional[str], content: Dict[str, Any]
+    ) -> Optional[str]:
+        """Return the original poll message id for a Spectrum vote event.
+
+        Spectrum 12.x emits vote ids as
+        ``<poll id>:<sender>:<option>:<action>:<timestamp>``. Prefer an
+        explicit field if a future sidecar provides one; otherwise parse the
+        documented synthetic id and fail closed when the shape is unknown.
+        """
+        explicit = str(content.get("pollMessageId") or "").strip()
+        if explicit:
+            return explicit
+        raw = str(event_message_id or "").strip()
+        parent, separator, _rest = raw.partition(":")
+        return parent if separator and parent else None
+
+    def _claim_first_poll_vote(
+        self, poll_message_id: Optional[str], sender_id: Optional[str]
+    ) -> bool:
+        """Accept only the first selection per sender for a poll we sent."""
+        if not poll_message_id or poll_message_id not in self._sent_message_ids:
+            return False
+        key = (poll_message_id, sender_id or "")
+        consumed = getattr(self, "_consumed_poll_voters", None)
+        if consumed is None:
+            # Some unit/plugin paths construct adapters without __init__.
+            consumed = {}
+            self._consumed_poll_voters = consumed
+        if key in consumed:
+            return False
+        consumed[key] = time.time()
+        if len(consumed) > self._POLL_VOTERS_MAX:
+            for old in list(consumed.keys())[
+                : len(consumed) - self._POLL_VOTERS_MAX
+            ]:
+                del consumed[old]
+        return True
 
     # A DM space is addressable two ways — the chat GUID (`any;-;+1555...`)
     # that inbound events carry, and the bare E.164 phone that home-channel
