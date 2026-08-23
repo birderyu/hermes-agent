@@ -87,6 +87,25 @@ test("ordinary unsupported messages keep their old representation", async (t) =>
   );
 });
 
+test("balloon identity survives when the server omits mini-app details", async (t) => {
+  const { root, chunk } = writeFixture();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  patchMiniAppInbound(root);
+  const { build } = await import(pathToFileURL(chunk).href + "?balloon");
+  assert.deepEqual(
+    build({
+      content: {
+        attachments: [],
+        balloonBundleId: "com.apple.findmy.FindMyMessagesApp",
+      },
+    }).content.raw,
+    {
+      imessage_type: "unsupported-message",
+      balloonBundleId: "com.apple.findmy.FindMyMessagesApp",
+    }
+  );
+});
+
 test("unknown mapper layouts fail without editing", (t) => {
   const { root, chunk } = writeFixture();
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

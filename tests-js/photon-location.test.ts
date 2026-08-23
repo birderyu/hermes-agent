@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 const locationModuleUrl = new URL(
   '../plugins/platforms/photon/sidecar/location.mjs',
@@ -91,26 +91,85 @@ describe('Photon iMessage location normalization', () => {
     })
   })
 
-  it('does not substitute a separate Find My current-location lookup', async () => {
+  it('resolves a Find My balloon through the sender snapshot on lowercase providers', async () => {
     const legacyCard = {
       type: 'custom',
       raw: {
-        content: {
-          balloonBundleId:
-            'com.apple.messages.MSMessageExtensionBalloonPlugin:com.apple.Maps.MessagesExtension',
-        },
+        balloonBundleId:
+          'com.apple.messages.MSMessageExtensionBalloonPlugin:0000000000:com.apple.findmy.FindMyMessagesApp',
       },
     }
+    const get = vi.fn().mockResolvedValue({
+      address: 'short address',
+      longAddress: '1 Example Road',
+      isLocatingInProgress: false,
+      locationType: 'legacy',
+      privateMetadata: 'must-not-forward',
+    })
     await expect(
       normalizeIMessageLocation(legacyCard, {
         app: {
           __internal: {
             platforms: new Map([
-              ['iMessage', { client: [{ locations: { get: () => 'wrong' } }] }],
+              [
+                'imessage',
+                {
+                  client: [
+                    {
+                      phone: 'shared',
+                      client: { locations: { get } },
+                    },
+                  ],
+                  definition: { name: 'imessage' },
+                },
+              ],
             ]),
           },
         },
+        phone: 'shared',
+        senderId: '+15550003333',
+        settleMs: 0,
       }),
+    ).resolves.toEqual({
+      type: 'location',
+      source: 'shared-location',
+      resolved: true,
+      address: '1 Example Road',
+    })
+    expect(get).toHaveBeenCalledWith('+15550003333')
+  })
+
+  it('keeps a recognized card unresolved when the sender snapshot is unavailable', async () => {
+    const get = vi.fn().mockRejectedValue(new Error('not available'))
+    await expect(
+      normalizeIMessageLocation(
+        {
+          type: 'custom',
+          raw: {
+            balloonBundleId:
+              'com.apple.messages.MSMessageExtensionBalloonPlugin:com.apple.findmy.FindMyMessagesApp',
+          },
+        },
+        {
+          app: {
+            __internal: {
+              platforms: new Map([
+                [
+                  'imessage',
+                  {
+                    client: [
+                      { phone: 'shared', client: { locations: { get } } },
+                    ],
+                  },
+                ],
+              ]),
+            },
+          },
+          phone: 'shared',
+          senderId: '+15550003333',
+          settleMs: 0,
+        },
+      ),
     ).resolves.toEqual({ type: 'location', resolved: false })
   })
 
