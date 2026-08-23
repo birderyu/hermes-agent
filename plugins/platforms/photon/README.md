@@ -206,8 +206,11 @@ deliberate:
    Spectrum 12 preserves mixed text/attachments itself, so that patcher is now
    a no-op on the pinned version. The mini-app patch preserves only decoded,
    user-visible inbound card fields so Apple Maps/Find My locations reach
-   Hermes. `npm install` runs the patchers via `postinstall` and fails loudly
-   if their compiled-output anchors no longer match.
+   Hermes. When Photon Cloud omits decoded mini-app fields for a Find My card,
+   the bundle identity is retained so Hermes can read the sender's matching
+   shared-location address snapshot. `npm install` runs the patchers via
+   `postinstall` and fails loudly if their compiled-output anchors no longer
+   match.
 5. Run `pytest tests/plugins/platforms/photon/`.
 6. Verify end-to-end: `hermes photon status`, a DM and a group roundtrip,
    and an agent reply into a group right after a gateway restart (exercises
