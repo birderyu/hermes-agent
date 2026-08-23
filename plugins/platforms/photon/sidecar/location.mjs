@@ -228,10 +228,7 @@ export function sanitizeSharedLocation(snapshot) {
 }
 
 function wait(ms) {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    timer.unref?.();
-  });
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function withTimeout(promise, timeoutMs) {
