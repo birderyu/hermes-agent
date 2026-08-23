@@ -102,6 +102,47 @@ async def test_dispatch_read_receipt_alias_does_not_wake_agent(
     await adapter._dispatch_inbound(receipt)
 
     assert captured == []
+@pytest.mark.asyncio
+async def test_dispatch_resolved_location_dm(monkeypatch: pytest.MonkeyPatch) -> None:
+    adapter = _make_adapter(monkeypatch)
+    captured = _capture(adapter, monkeypatch)
+    event = _dm_event("", msg_id="spc-msg-location")
+    event["content"] = {
+        "type": "location",
+        "resolved": True,
+        "source": "shared-location",
+        "name": "Test Place",
+        "address": "1 Example Road",
+        "latitude": 31.2304,
+        "longitude": 121.4737,
+    }
+
+    await adapter._dispatch_inbound(event)
+
+    assert len(captured) == 1
+    message = captured[0]
+    assert message.message_type == MessageType.LOCATION
+    assert "[The user shared an iMessage location card.]" in message.text
+    assert "Name: Test Place" in message.text
+    assert "Address: 1 Example Road" in message.text
+    assert "https://maps.apple.com/?ll=31.2304,121.4737" in message.text
+    assert "may differ from a separate place pin" in message.text
+
+
+@pytest.mark.asyncio
+async def test_dispatch_unresolved_location_dm(monkeypatch: pytest.MonkeyPatch) -> None:
+    adapter = _make_adapter(monkeypatch)
+    captured = _capture(adapter, monkeypatch)
+    event = _dm_event("", msg_id="spc-msg-location-unresolved")
+    event["content"] = {"type": "location", "resolved": False}
+
+    await adapter._dispatch_inbound(event)
+
+    assert len(captured) == 1
+    message = captured[0]
+    assert message.message_type == MessageType.LOCATION
+    assert "recognized the card" in message.text
+    assert "address or coordinates" in message.text
 
 
 # A real 1x1 transparent PNG (passes base.py's _looks_like_image magic check).

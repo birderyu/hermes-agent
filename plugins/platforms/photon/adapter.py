@@ -653,6 +653,37 @@ def _richlink_url_from_content(content: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _format_location_content(content: Dict[str, Any]) -> str:
+    """Render a privacy-bounded Photon location event for the agent."""
+    parts = ["[The user shared an iMessage location card.]"]
+    if content.get("resolved") is not True:
+        parts.append(
+            "Photon recognized the card, but iMessage did not expose its "
+            "address or coordinates. Ask the user to send the address or an "
+            "Apple Maps link if the exact place is needed."
+        )
+        return "\n".join(parts)
+
+    name = str(content.get("name") or "").strip()
+    address = str(content.get("address") or "").strip()
+    latitude = content.get("latitude")
+    longitude = content.get("longitude")
+    if name:
+        parts.append(f"Name: {name}")
+    if address:
+        parts.append(f"Address: {address}")
+    if isinstance(latitude, (int, float)) and isinstance(longitude, (int, float)):
+        parts.append(f"latitude: {latitude}")
+        parts.append(f"longitude: {longitude}")
+        parts.append(f"Map: https://maps.apple.com/?ll={latitude},{longitude}")
+    if content.get("source") == "shared-location":
+        parts.append(
+            "Note: Photon resolved the sender's current shared-location "
+            "snapshot; it may differ from a separate place pin in the card."
+        )
+    return "\n".join(parts)
+
+
 def _is_richlink_preview_attachment(payload: Dict[str, Any]) -> bool:
     if payload.get("type") != "attachment":
         return False
@@ -1218,6 +1249,8 @@ class PhotonAdapter(BasePlatformAdapter):
                           "targetMessageId": "..." | null,
                           "targetDirection": "inbound"|"outbound" | null,
                           "targetText": "..." | null},
+                       | {"type": "location", "resolved": bool,
+                          "name"?, "address"?, "latitude"?, "longitude"?},
               "timestamp": "2026-05-14T19:06:32.000Z"
 
         Attachment and voice content carry the bytes inline as base64 ``data``
@@ -1419,6 +1452,9 @@ class PhotonAdapter(BasePlatformAdapter):
         elif ctype == "richlink":
             text = _format_richlink_content(content)
             mtype = MessageType.TEXT
+        elif ctype == "location":
+            text = _format_location_content(content)
+            mtype = MessageType.LOCATION
         elif ctype == "group":
             text_parts: List[str] = []
             mtype = MessageType.TEXT
@@ -1436,6 +1472,11 @@ class PhotonAdapter(BasePlatformAdapter):
                     continue
                 if item_type == "richlink":
                     text_parts.append(_format_richlink_content(item_content))
+                    continue
+                if item_type == "location":
+                    text_parts.append(_format_location_content(item_content))
+                    if mtype == MessageType.TEXT:
+                        mtype = MessageType.LOCATION
                     continue
                 if item_type in {"attachment", "voice"}:
                     marker, item_mtype, item_urls, item_types = _normalize_binary_payload(
