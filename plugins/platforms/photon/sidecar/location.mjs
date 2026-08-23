@@ -16,6 +16,8 @@ const CARD_TEXT_FIELDS = [
 ];
 const MAX_URL_LENGTH = 4096;
 const MAX_TEXT_LENGTH = 1000;
+const SHARED_LOCATION_SETTLE_MS = 750;
+const SHARED_LOCATION_TIMEOUT_MS = 5000;
 
 function firstString(...values) {
   for (const value of values) {
@@ -174,6 +176,101 @@ export function sanitizeMiniAppLocation(content) {
   };
 }
 
-export async function normalizeIMessageLocation(content) {
-  return sanitizeMiniAppLocation(content);
+function runtimeForIMessage(app) {
+  const platforms = app?.__internal?.platforms;
+  if (!(platforms instanceof Map)) return null;
+  for (const [key, runtime] of platforms) {
+    const candidates = [key, runtime?.definition?.name, runtime?.definition?.id];
+    if (
+      candidates.some(
+        (value) =>
+          typeof value === "string" && value.toLowerCase() === "imessage"
+      )
+    ) {
+      return runtime;
+    }
+  }
+  return null;
+}
+
+export function selectIMessageLocationClient(app, phone) {
+  const clients = runtimeForIMessage(app)?.client;
+  if (!Array.isArray(clients) || clients.length === 0) return null;
+  const entry =
+    clients.find((candidate) => candidate?.phone === phone) ??
+    (clients.length === 1 ? clients[0] : null);
+  const client = entry?.client;
+  return typeof client?.locations?.get === "function" ? client : null;
+}
+
+export function sanitizeSharedLocation(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") return null;
+  if (snapshot.isLocatingInProgress === true) return null;
+  const latitude = finiteCoordinate(snapshot.latitude, -90, 90);
+  const longitude = finiteCoordinate(snapshot.longitude, -180, 180);
+  if ((latitude === null) !== (longitude === null)) return null;
+  const name = boundedString(snapshot.name, MAX_TEXT_LENGTH);
+  const address = firstString(
+    boundedString(snapshot.longAddress, MAX_TEXT_LENGTH),
+    boundedString(snapshot.address, MAX_TEXT_LENGTH),
+    boundedString(snapshot.shortAddress, MAX_TEXT_LENGTH)
+  );
+  if (!name && !address && latitude === null) return null;
+  return {
+    type: "location",
+    source: "shared-location",
+    resolved: true,
+    ...(name ? { name } : {}),
+    ...(address && address !== name ? { address } : {}),
+    ...(latitude !== null ? { latitude, longitude } : {}),
+  };
+}
+
+function wait(ms) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+  });
+}
+
+function withTimeout(promise, timeoutMs) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error("shared-location lookup timed out")),
+      timeoutMs
+    );
+    timer.unref?.();
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+export async function normalizeIMessageLocation(content, context = {}) {
+  const card = sanitizeMiniAppLocation(content);
+  if (!card || card.resolved) return card;
+
+  const senderId = firstString(context.senderId);
+  const client = selectIMessageLocationClient(context.app, context.phone);
+  if (!senderId || !client) return card;
+
+  // The Find My address snapshot can land just after the balloon event. A
+  // short bounded wait avoids racing the cloud write while keeping inbound
+  // delivery responsive. This lookup is only attempted for a recognized
+  // location balloon from that same sender.
+  try {
+    const settleMs = Number.isFinite(context.settleMs)
+      ? Math.max(0, context.settleMs)
+      : SHARED_LOCATION_SETTLE_MS;
+    if (settleMs) await wait(settleMs);
+    const timeoutMs = Number.isFinite(context.timeoutMs)
+      ? Math.max(1, context.timeoutMs)
+      : SHARED_LOCATION_TIMEOUT_MS;
+    const snapshot = await withTimeout(
+      client.locations.get(senderId),
+      timeoutMs
+    );
+    return sanitizeSharedLocation(snapshot) ?? card;
+  } catch {
+    return card;
+  }
 }
