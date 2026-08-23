@@ -206,7 +206,6 @@ export function selectIMessageLocationClient(app, phone) {
 
 export function sanitizeSharedLocation(snapshot) {
   if (!snapshot || typeof snapshot !== "object") return null;
-  if (snapshot.isLocatingInProgress === true) return null;
   const latitude = finiteCoordinate(snapshot.latitude, -90, 90);
   const longitude = finiteCoordinate(snapshot.longitude, -180, 180);
   if ((latitude === null) !== (longitude === null)) return null;
