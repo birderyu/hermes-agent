@@ -9,6 +9,7 @@ const {
   isIMessageLocationCustom,
   normalizeIMessageLocation,
   sanitizeMiniAppLocation,
+  sanitizeSharedLocation,
 } = await import(locationModuleUrl)
 
 const MAPS_CARD = {
@@ -182,7 +183,7 @@ describe('Photon iMessage location normalization', () => {
       .mockRejectedValueOnce(new Error('snapshot still propagating'))
       .mockRejectedValueOnce(new Error('location route still warming'))
       .mockResolvedValueOnce({
-        address: '1 Example Road',
+        longAddress: '1 Example Road',
         isLocatingInProgress: false,
       })
     const app = {
@@ -222,6 +223,16 @@ describe('Photon iMessage location normalization', () => {
       address: '1 Example Road',
     })
     expect(get).toHaveBeenCalledTimes(3)
+  })
+
+  it('never treats the sender contact handle as a geographic address', () => {
+    expect(
+      sanitizeSharedLocation({
+        address: '+15550003333',
+        isLocatingInProgress: true,
+        locationType: 'legacy',
+      }),
+    ).toBeNull()
   })
 
   it('rejects non-map custom URLs while keeping visible text', () => {
