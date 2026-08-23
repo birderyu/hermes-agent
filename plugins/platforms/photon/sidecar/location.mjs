@@ -17,7 +17,7 @@ const CARD_TEXT_FIELDS = [
 const MAX_URL_LENGTH = 4096;
 const MAX_TEXT_LENGTH = 1000;
 const SHARED_LOCATION_SETTLE_MS = 750;
-const SHARED_LOCATION_TIMEOUT_MS = 12000;
+const SHARED_LOCATION_TIMEOUT_MS = 20000;
 const SHARED_LOCATION_RETRY_MS = 750;
 
 function firstString(...values) {
@@ -267,10 +267,11 @@ export async function normalizeIMessageLocation(content, context = {}) {
     : SHARED_LOCATION_RETRY_MS;
   const deadline = Date.now() + timeoutMs;
 
-  // Photon may return a transient not-found while the address snapshot is
-  // propagating, then succeed on the next read. Retry once within a single
-  // overall time budget so a slow/unavailable lookup cannot wedge inbound.
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  // Photon may return transient not-found responses while the address
+  // snapshot and its route are warming, then succeed on the third read. Retry
+  // twice within one overall budget so an unavailable lookup cannot wedge
+  // inbound indefinitely.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     if (attempt > 0 && retryMs) await wait(retryMs);
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) break;
@@ -282,7 +283,7 @@ export async function normalizeIMessageLocation(content, context = {}) {
       const normalized = sanitizeSharedLocation(snapshot);
       if (normalized) return normalized;
     } catch {
-      // Retry once: transient not-found is common immediately after the card.
+      // Retry: transient not-found is common immediately after the card.
     }
   }
   return card;
