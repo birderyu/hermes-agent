@@ -174,10 +174,11 @@ describe('Photon iMessage location normalization', () => {
     ).resolves.toEqual({ type: 'location', resolved: false })
   })
 
-  it('retries one transient lookup failure within the overall budget', async () => {
+  it('retries transient lookup failures within the overall budget', async () => {
     const get = vi
       .fn()
       .mockRejectedValueOnce(new Error('snapshot still propagating'))
+      .mockRejectedValueOnce(new Error('location route still warming'))
       .mockResolvedValueOnce({
         address: '1 Example Road',
         isLocatingInProgress: false,
@@ -218,7 +219,7 @@ describe('Photon iMessage location normalization', () => {
       resolved: true,
       address: '1 Example Road',
     })
-    expect(get).toHaveBeenCalledTimes(2)
+    expect(get).toHaveBeenCalledTimes(3)
   })
 
   it('rejects non-map custom URLs while keeping visible text', () => {
