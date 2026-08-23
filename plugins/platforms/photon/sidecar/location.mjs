@@ -18,6 +18,7 @@ const MAX_URL_LENGTH = 4096;
 const MAX_TEXT_LENGTH = 1000;
 const SHARED_LOCATION_SETTLE_MS = 750;
 const SHARED_LOCATION_TIMEOUT_MS = 12000;
+const SHARED_LOCATION_RETRY_MS = 750;
 
 function firstString(...values) {
   for (const value of values) {
@@ -257,20 +258,35 @@ export async function normalizeIMessageLocation(content, context = {}) {
   // short bounded wait avoids racing the cloud write while keeping inbound
   // delivery responsive. This lookup is only attempted for a recognized
   // location balloon from that same sender.
-  try {
-    const settleMs = Number.isFinite(context.settleMs)
-      ? Math.max(0, context.settleMs)
-      : SHARED_LOCATION_SETTLE_MS;
-    if (settleMs) await wait(settleMs);
-    const timeoutMs = Number.isFinite(context.timeoutMs)
-      ? Math.max(1, context.timeoutMs)
-      : SHARED_LOCATION_TIMEOUT_MS;
-    const snapshot = await withTimeout(
-      client.locations.get(senderId),
-      timeoutMs
-    );
-    return sanitizeSharedLocation(snapshot) ?? card;
-  } catch {
-    return card;
+  const settleMs = Number.isFinite(context.settleMs)
+    ? Math.max(0, context.settleMs)
+    : SHARED_LOCATION_SETTLE_MS;
+  if (settleMs) await wait(settleMs);
+  const timeoutMs = Number.isFinite(context.timeoutMs)
+    ? Math.max(1, context.timeoutMs)
+    : SHARED_LOCATION_TIMEOUT_MS;
+  const retryMs = Number.isFinite(context.retryMs)
+    ? Math.max(0, context.retryMs)
+    : SHARED_LOCATION_RETRY_MS;
+  const deadline = Date.now() + timeoutMs;
+
+  // Photon may return a transient not-found while the address snapshot is
+  // propagating, then succeed on the next read. Retry once within a single
+  // overall time budget so a slow/unavailable lookup cannot wedge inbound.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (attempt > 0 && retryMs) await wait(retryMs);
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) break;
+    try {
+      const snapshot = await withTimeout(
+        client.locations.get(senderId),
+        remainingMs
+      );
+      const normalized = sanitizeSharedLocation(snapshot);
+      if (normalized) return normalized;
+    } catch {
+      // Retry once: transient not-found is common immediately after the card.
+    }
   }
+  return card;
 }
