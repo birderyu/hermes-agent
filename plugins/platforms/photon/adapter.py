@@ -529,6 +529,7 @@ class PhotonAdapter(BasePlatformAdapter):
         self._sent_message_ids: Dict[str, float] = {}  # only reactions targeting OUR sends are routed
         self._last_inbound_by_chat: Dict[str, str] = {}  # default target for the react action
         self._recent_richlinks_by_chat: Dict[str, float] = {}  # coalesce preview-art attachments
+        self._consumed_poll_voters: Dict[tuple[str, str], float] = {}  # first vote per poll/sender
         self._typing_last_sent: Dict[str, float] = {}
         self._pending_fffc: Dict[str, tuple[float, Any]] = {}  # chat_key → (timestamp, asyncio.Task)
         # Group-chat mention gating (parity with BlueBubbles); DMs are never gated.
@@ -806,6 +807,17 @@ class PhotonAdapter(BasePlatformAdapter):
             choice = (content.get("title") or "").strip()
             if not choice:
                 logger.debug("[photon] ignoring poll vote with empty title")
+                return
+            poll_message_id = self._poll_parent_message_id(
+                event.get("messageId"), content
+            )
+            if not self._claim_first_poll_vote(poll_message_id, sender_id):
+                logger.debug(
+                    "[photon] ignoring untracked or repeated poll vote "
+                    "(poll=%s, sender=%s)",
+                    poll_message_id,
+                    sender_id,
+                )
                 return
             await self.handle_message(_event(choice))
             return
@@ -1210,14 +1222,57 @@ class PhotonAdapter(BasePlatformAdapter):
 
     _SENT_IDS_MAX = 1000
     _LAST_INBOUND_CHATS_MAX = 200
+    _POLL_VOTERS_MAX = 1000
 
     def _record_sent_message(self, message_id: Optional[str]) -> None:
         if message_id:
             bounded_put(self._sent_message_ids, message_id, time.time(), self._SENT_IDS_MAX)
 
-    # A DM space is addressable as the chat GUID (`any;-;+1555...`) inbound events carry, or
-    # the bare E.164 phone home-channel config uses; the sidecar's resolveSpace treats them
-    # as one space, so normalize to the bare phone (mirrors phoneTargetFromSpaceId in index.mjs).
+    @staticmethod
+    def _poll_parent_message_id(
+        event_message_id: Optional[str], content: Dict[str, Any]
+    ) -> Optional[str]:
+        """Return the original poll message id for a Spectrum vote event.
+
+        Spectrum 12.x emits vote ids as
+        ``<poll id>:<sender>:<option>:<action>:<timestamp>``. Prefer an
+        explicit field if a future sidecar provides one; otherwise parse the
+        documented synthetic id and fail closed when the shape is unknown.
+        """
+        explicit = str(content.get("pollMessageId") or "").strip()
+        if explicit:
+            return explicit
+        raw = str(event_message_id or "").strip()
+        parent, separator, _rest = raw.partition(":")
+        return parent if separator and parent else None
+
+    def _claim_first_poll_vote(
+        self, poll_message_id: Optional[str], sender_id: Optional[str]
+    ) -> bool:
+        """Accept only the first selection per sender for a poll we sent."""
+        if not poll_message_id or poll_message_id not in self._sent_message_ids:
+            return False
+        key = (poll_message_id, sender_id or "")
+        consumed = getattr(self, "_consumed_poll_voters", None)
+        if consumed is None:
+            # Some unit/plugin paths construct adapters without __init__.
+            consumed = {}
+            self._consumed_poll_voters = consumed
+        if key in consumed:
+            return False
+        consumed[key] = time.time()
+        if len(consumed) > self._POLL_VOTERS_MAX:
+            for old in list(consumed.keys())[
+                : len(consumed) - self._POLL_VOTERS_MAX
+            ]:
+                del consumed[old]
+        return True
+
+    # A DM space is addressable two ways — the chat GUID (`any;-;+1555...`)
+    # that inbound events carry, and the bare E.164 phone that home-channel
+    # config typically uses. The sidecar's resolveSpace treats them as the
+    # same space; normalize to the bare phone so the last-inbound tracker
+    # does too (mirrors phoneTargetFromSpaceId in sidecar/index.mjs).
     _DM_CHAT_GUID_RE = re.compile(r"^any;-;(\+\d{6,})$")
 
     @classmethod

@@ -102,6 +102,26 @@ async def test_dispatch_read_receipt_alias_does_not_wake_agent(
     await adapter._dispatch_inbound(receipt)
 
     assert captured == []
+
+
+@pytest.mark.asyncio
+async def test_dispatch_read_receipt_is_silently_dropped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Spectrum 12.8 read receipt is transport state, not a user turn."""
+    adapter = _make_adapter(monkeypatch)
+    captured = _capture(adapter, monkeypatch)
+    event = _dm_event("", msg_id="spc-msg-outbound:read:42")
+    event["content"] = {
+        "type": "read",
+        "target": {"id": "spc-msg-outbound"},
+    }
+
+    await adapter._dispatch_inbound(event)
+
+    assert captured == []
+
+
 @pytest.mark.asyncio
 async def test_dispatch_resolved_location_dm(monkeypatch: pytest.MonkeyPatch) -> None:
     adapter = _make_adapter(monkeypatch)
