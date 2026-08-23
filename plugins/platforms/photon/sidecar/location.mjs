@@ -212,7 +212,6 @@ export function sanitizeSharedLocation(snapshot) {
   const name = boundedString(snapshot.name, MAX_TEXT_LENGTH);
   const address = firstString(
     boundedString(snapshot.longAddress, MAX_TEXT_LENGTH),
-    boundedString(snapshot.address, MAX_TEXT_LENGTH),
     boundedString(snapshot.shortAddress, MAX_TEXT_LENGTH)
   );
   if (!name && !address && latitude === null) return null;
