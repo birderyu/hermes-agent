@@ -561,7 +561,7 @@ class PhotonAdapter(BasePlatformAdapter):
         self._sent_message_ids: Dict[str, float] = {}  # only reactions targeting OUR sends are routed
         self._last_inbound_by_chat: Dict[str, str] = {}  # default target for the react action
         self._recent_richlinks_by_chat: Dict[str, float] = {}  # coalesce preview-art attachments
-        self._consumed_poll_voters: Dict[tuple[str, str], float] = {}  # first vote per poll/sender
+        self._clarify_polls: Dict[str, Dict[str, Any]] = {}  # votes stay scoped to their clarify
         self._typing_last_sent: Dict[str, float] = {}
         self._pending_fffc: Dict[str, tuple[float, Any]] = {}  # chat_key → (timestamp, asyncio.Task)
         # Group-chat mention gating (parity with BlueBubbles); DMs are never gated.
@@ -835,12 +835,32 @@ class PhotonAdapter(BasePlatformAdapter):
         if self._is_recent_richlink_preview(space_id, content):
             logger.info("[photon] suppressing rich-link preview attachment: %s", _richlink_preview_label(content))
             return
-        # Everything past here is a real (reactable) message. Recorded before the mention
-        # gate: reacting to a non-wake-word group message is valid.
-        self._record_last_inbound(space_id, message_id)
         if ctype == "poll_option":
-            # Native poll vote: a selection is forwarded as if typed (the gateway's
-            # pending-clarify intercept resolves it); a deselection is dropped.
+            poll_message_id = self._poll_parent_message_id(
+                event.get("messageId"), content
+            )
+            # Clarify-backed polls have their own lifecycle. Resolve them
+            # directly so a later vote change can never escape as a new user
+            # turn after the waiting tool has already returned.
+            if self._handle_clarify_poll_option(
+                poll_message_id, sender_id, content
+            ):
+                return
+            # Poll events not targeting a message sent by this adapter are not
+            # addressed to Hermes (and include stale pre-restart cards).
+            if (
+                not poll_message_id
+                or poll_message_id not in self._sent_message_ids
+            ):
+                logger.debug(
+                    "[photon] ignoring untracked poll vote (poll=%s)",
+                    poll_message_id,
+                )
+                return
+            # An ordinary native poll is not a clarify. Preserve Spectrum's
+            # event stream: every selection can enter the ordinary message
+            # lane, including a later selection by the same participant.
+            # Deselections carry no answer text and remain transport state.
             if content.get("selected") is False:
                 logger.debug("[photon] ignoring poll deselection")
                 return
@@ -848,19 +868,9 @@ class PhotonAdapter(BasePlatformAdapter):
             if not choice:
                 logger.debug("[photon] ignoring poll vote with empty title")
                 return
-            poll_message_id = self._poll_parent_message_id(
-                event.get("messageId"), content
-            )
-            if not self._claim_first_poll_vote(poll_message_id, sender_id):
-                logger.debug(
-                    "[photon] ignoring untracked or repeated poll vote "
-                    "(poll=%s, sender=%s)",
-                    poll_message_id,
-                    sender_id,
-                )
-                return
             await self.handle_message(_event(choice))
             return
+        self._record_last_inbound(space_id, message_id)
         if ctype in _BINARY_CONTENT_TYPES:
             # Base64 decode + media-cache write of possibly multi-MB payloads — keep it off the event loop.
             text, mtype, media_urls, media_types = await asyncio.to_thread(_normalize_content, content)
@@ -1186,21 +1196,82 @@ class PhotonAdapter(BasePlatformAdapter):
                    metadata: Optional[Dict[str, Any]] = None) -> SendResult:
         return await self._sidecar_send(chat_id, self.format_message(content))
 
-    async def send_clarify(self, chat_id: str, question: str, choices: Optional[list], clarify_id: str,
-                           session_key: str, metadata: Optional[Dict[str, Any]] = None) -> SendResult:
-        """Multiple-choice renders as a native poll; the vote comes back as a `poll_option`
-        event that _dispatch_inbound turns into plain text, so the clarify is flipped into
-        text-capture mode like the base fallback."""
-        if not choices:  # open-ended: base plain-text behaviour is right
-            return await super().send_clarify(chat_id, question, choices, clarify_id, session_key, metadata)
-        from tools.clarify_gateway import mark_awaiting_text
-        mark_awaiting_text(clarify_id)
-        result = await self._sidecar_send_poll(chat_id, question, list(choices))
+    # -- Clarify (native iMessage poll) ------------------------------------
+    #
+    # iMessage has a native poll bubble; spectrum-ts exposes it via the
+    # `poll()` content builder. A multiple-choice clarify renders as that poll
+    # and the user taps a choice instead of typing a number. The vote streams
+    # back inbound as a `poll_option` event correlated to the blocking clarify,
+    # which it resolves directly. Open-ended clarifies (no choices) keep the
+    # plain-text path. Multi-select clarifies collect native selection changes
+    # until the user taps an explicit completion option.
+
+    async def send_clarify(
+        self,
+        chat_id: str,
+        question: str,
+        choices: Optional[list],
+        clarify_id: str,
+        session_key: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> SendResult:
+        if not choices:
+            # No choices → open-ended. Base behaviour (plain text; the next
+            # message resolves it) is exactly right.
+            return await super().send_clarify(
+                chat_id, question, choices, clarify_id, session_key, metadata
+            )
+        from tools import clarify_gateway as _clarify_gateway
+
+        # ``multi_select`` is already registered by the gateway. Keep the
+        # adapter signature compatible and read the pending entry exactly as
+        # the base fallback does.
+        with _clarify_gateway._lock:
+            entry = _clarify_gateway._entries.get(clarify_id)
+        multi_select = bool(entry and getattr(entry, "multi_select", False))
+
+        poll_choices = list(choices)
+        done_label: Optional[str] = None
+        poll_title = question
+        if multi_select:
+            done_label = self._multi_select_done_label(poll_choices)
+            poll_choices.append(done_label)
+            poll_title = f'{question}\n\n可多选；选好后请点“{done_label}”。'
+
+        result = await self._sidecar_send_poll(chat_id, poll_title, poll_choices)
         if not result.success:
-            # Old sidecar without /send-poll or a send error: numbered-text clarify fallback
-            # (base also calls mark_awaiting_text; harmless).
-            logger.warning("[photon] poll clarify failed (%s); falling back to text list", result.error)
-            return await super().send_clarify(chat_id, question, choices, clarify_id, session_key, metadata)
+            # Native poll failed (old sidecar without /send-poll, or a send
+            # error) — fall back to the numbered-text clarify so the user can
+            # still answer. The base implementation enables text capture.
+            logger.warning(
+                "[photon] poll clarify failed (%s); falling back to text list",
+                result.error,
+            )
+            return await super().send_clarify(
+                chat_id, question, choices, clarify_id, session_key, metadata
+            )
+        if not result.message_id:
+            # A native poll without its message id cannot be correlated safely
+            # with the pending clarify. Fall back to text rather than letting a
+            # later vote leak into the ordinary message lane.
+            logger.warning(
+                "[photon] poll clarify returned no message id; "
+                "falling back to text list"
+            )
+            return await super().send_clarify(
+                chat_id, question, choices, clarify_id, session_key, metadata
+            )
+        self._remember_clarify_poll(
+            result.message_id,
+            clarify_id=clarify_id,
+            session_key=session_key,
+            choices=list(choices),
+            multi_select=multi_select,
+            done_label=done_label,
+        )
+        # Photon has no separate "Other" button. Keep typed replies available
+        # as the free-form alternative while poll taps resolve directly.
+        _clarify_gateway.mark_awaiting_text(clarify_id)
         return result
 
     # -- Outbound media (parity with BlueBubbles): URL-based helpers cache to a local path
@@ -1262,7 +1333,7 @@ class PhotonAdapter(BasePlatformAdapter):
 
     _SENT_IDS_MAX = 1000
     _LAST_INBOUND_CHATS_MAX = 200
-    _POLL_VOTERS_MAX = 1000
+    _CLARIFY_POLLS_MAX = 1000
 
     def _record_sent_message(self, message_id: Optional[str]) -> None:
         if message_id:
@@ -1286,26 +1357,109 @@ class PhotonAdapter(BasePlatformAdapter):
         parent, separator, _rest = raw.partition(":")
         return parent if separator and parent else None
 
-    def _claim_first_poll_vote(
-        self, poll_message_id: Optional[str], sender_id: Optional[str]
-    ) -> bool:
-        """Accept only the first selection per sender for a poll we sent."""
-        if not poll_message_id or poll_message_id not in self._sent_message_ids:
-            return False
-        key = (poll_message_id, sender_id or "")
-        consumed = getattr(self, "_consumed_poll_voters", None)
-        if consumed is None:
-            # Some unit/plugin paths construct adapters without __init__.
-            consumed = {}
-            self._consumed_poll_voters = consumed
-        if key in consumed:
-            return False
-        consumed[key] = time.time()
-        if len(consumed) > self._POLL_VOTERS_MAX:
-            for old in list(consumed.keys())[
-                : len(consumed) - self._POLL_VOTERS_MAX
+    @staticmethod
+    def _multi_select_done_label(choices: list) -> str:
+        """Return a submit label that cannot collide with a real choice."""
+        labels = {str(choice).strip() for choice in choices}
+        label = "✅ 完成选择"
+        while label in labels:
+            label += "（提交）"
+        return label
+
+    def _remember_clarify_poll(
+        self,
+        message_id: str,
+        *,
+        clarify_id: str,
+        session_key: str,
+        choices: list,
+        multi_select: bool,
+        done_label: Optional[str],
+    ) -> None:
+        """Correlate a native poll with the blocking clarify that created it."""
+        polls = getattr(self, "_clarify_polls", None)
+        if polls is None:
+            # Some plugin/unit paths construct adapters without ``__init__``.
+            polls = {}
+            self._clarify_polls = polls
+        polls[str(message_id)] = {
+            "clarify_id": str(clarify_id),
+            "session_key": str(session_key),
+            "choices": tuple(str(choice).strip() for choice in choices),
+            "multi_select": bool(multi_select),
+            "done_label": done_label,
+            "selected_by_sender": {},
+            "closed": False,
+            "created_at": time.time(),
+        }
+        if len(polls) > self._CLARIFY_POLLS_MAX:
+            for old in list(polls.keys())[
+                : len(polls) - self._CLARIFY_POLLS_MAX
             ]:
-                del consumed[old]
+                del polls[old]
+
+    def _handle_clarify_poll_option(
+        self,
+        poll_message_id: Optional[str],
+        sender_id: Optional[str],
+        content: Dict[str, Any],
+    ) -> bool:
+        """Consume a vote when it belongs to a clarify-backed native poll.
+
+        Returns ``True`` whenever the poll is owned by a clarify, including
+        after that clarify has closed. This ownership check is the important
+        boundary: late vote changes stay attached to the old interaction and
+        never become unrelated user turns.
+        """
+        polls = getattr(self, "_clarify_polls", {})
+        state = polls.get(str(poll_message_id or ""))
+        if state is None:
+            return False
+        if state.get("closed"):
+            return True
+
+        choice = str(content.get("title") or "").strip()
+        selected = content.get("selected") is not False
+        choices = tuple(state.get("choices") or ())
+
+        if state.get("multi_select"):
+            done_label = str(state.get("done_label") or "")
+            sender_key = str(sender_id or "")
+            selected_by_sender = state.setdefault("selected_by_sender", {})
+            selected_choices = selected_by_sender.setdefault(sender_key, set())
+
+            if choice == done_label:
+                if not selected:
+                    return True
+                ordered = [item for item in choices if item in selected_choices]
+                from tools.clarify_gateway import resolve_gateway_clarify
+
+                response = json.dumps(ordered, ensure_ascii=False)
+                resolve_gateway_clarify(state["clarify_id"], response)
+                state["closed"] = True
+                return True
+
+            if choice not in choices:
+                logger.debug(
+                    "[photon] ignoring unknown multi-select clarify option: %s",
+                    choice,
+                )
+                return True
+            if selected:
+                selected_choices.add(choice)
+            else:
+                selected_choices.discard(choice)
+            return True
+
+        # Single-select clarify: the first valid selection resolves it. The
+        # state remains as a closed ownership tombstone so all later changes
+        # are swallowed without changing ordinary-poll behavior.
+        if not selected or choice not in choices:
+            return True
+        from tools.clarify_gateway import resolve_gateway_clarify
+
+        resolve_gateway_clarify(state["clarify_id"], choice)
+        state["closed"] = True
         return True
 
     # A DM space is addressable two ways — the chat GUID (`any;-;+1555...`)
