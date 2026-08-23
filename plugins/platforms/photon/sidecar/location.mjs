@@ -1,15 +1,21 @@
-// Privacy-bounded normalization for iMessage location cards.
+// Privacy-bounded normalization for decoded iMessage mini-app location cards.
 //
-// spectrum-ts 8 surfaces no-text/no-attachment iMessage app balloons as
-// `custom(rawMessage)`. The raw Apple message contains a balloon bundle id,
-// but forwarding the entire value would expose unrelated message metadata.
-// This module therefore allowlists only location-shaped balloons and, when
-// available, asks the already-authenticated Advanced iMessage client for the
-// sender's current shared-location snapshot.
+// Advanced iMessage 2.1 exposes the URL and visible layout text embedded in an
+// inbound app-extension balloon. Hermes forwards those exact card fields only;
+// opaque session/team identifiers and the full Apple message are discarded.
 
 const LOCATION_BUNDLE_HINTS = ["findmy", "maps", "location"];
-const DEFAULT_TIMEOUT_MS = 5000;
-const MAX_LOCATION_AGE_MS = 15 * 60 * 1000;
+const CARD_TEXT_FIELDS = [
+  "caption",
+  "subcaption",
+  "trailingCaption",
+  "trailingSubcaption",
+  "imageTitle",
+  "imageSubtitle",
+  "summary",
+];
+const MAX_URL_LENGTH = 4096;
+const MAX_TEXT_LENGTH = 1000;
 
 function firstString(...values) {
   for (const value of values) {
@@ -18,10 +24,29 @@ function firstString(...values) {
   return null;
 }
 
+function boundedString(value, maxLength) {
+  const text = firstString(value);
+  return text && text.length <= maxLength ? text : null;
+}
+
+function customRaw(content) {
+  return content?.type === "custom" &&
+    content.raw &&
+    typeof content.raw === "object"
+    ? content.raw
+    : null;
+}
+
+function miniAppFromContent(content) {
+  const raw = customRaw(content);
+  if (!raw) return null;
+  const miniApp = raw.miniApp ?? raw.content?.miniApp;
+  return miniApp && typeof miniApp === "object" ? miniApp : null;
+}
+
 export function locationBalloonBundleId(content) {
-  if (!content || content.type !== "custom") return null;
-  const raw = content.raw;
-  if (!raw || typeof raw !== "object") return null;
+  const raw = customRaw(content);
+  if (!raw) return null;
   const rawContent =
     raw.content && typeof raw.content === "object" ? raw.content : {};
   const metadata =
@@ -37,141 +62,118 @@ export function locationBalloonBundleId(content) {
 }
 
 export function isIMessageLocationCustom(content) {
-  const bundleId = locationBalloonBundleId(content);
-  if (!bundleId) return false;
-  const lowered = bundleId.toLowerCase();
-  return LOCATION_BUNDLE_HINTS.some((hint) => lowered.includes(hint));
-}
-
-function runtimeForIMessage(app) {
-  const platforms = app?.__internal?.platforms;
-  if (!(platforms instanceof Map)) return null;
-  const direct = platforms.get("iMessage");
-  if (direct) return direct;
-  for (const runtime of platforms.values()) {
-    if (runtime?.definition?.name === "iMessage") return runtime;
-  }
-  return null;
-}
-
-export function selectIMessageLocationClient(app, phone) {
-  const clients = runtimeForIMessage(app)?.client;
-  if (!Array.isArray(clients) || clients.length === 0) return null;
-  const entry =
-    clients.find((candidate) => candidate?.phone === phone) ??
-    (clients.length === 1 ? clients[0] : null);
-  const client = entry?.client;
-  return typeof client?.locations?.get === "function" ? client : null;
+  const miniApp = miniAppFromContent(content);
+  const identifiers = [
+    locationBalloonBundleId(content),
+    miniApp?.extensionBundleId,
+    miniApp?.appName,
+  ];
+  return identifiers.some((identifier) => {
+    const lowered = firstString(identifier)?.toLowerCase();
+    return (
+      lowered && LOCATION_BUNDLE_HINTS.some((hint) => lowered.includes(hint))
+    );
+  });
 }
 
 function finiteCoordinate(value, min, max) {
-  return typeof value === "number" &&
-    Number.isFinite(value) &&
-    value >= min &&
-    value <= max
-    ? value
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) && number >= min && number <= max
+    ? number
     : null;
 }
 
-function toTimestamp(value) {
-  if (value instanceof Date) {
-    return Number.isFinite(value.getTime()) ? value : null;
-  }
-  if (typeof value !== "string" && typeof value !== "number") return null;
-  const parsed = new Date(value);
-  return Number.isFinite(parsed.getTime()) ? parsed : null;
-}
-
-function locationIsCurrent(snapshot, messageTimestamp, now) {
-  const expiresAt = toTimestamp(snapshot?.expiresAt);
-  if (expiresAt && expiresAt.getTime() < now.getTime()) return false;
-
-  const locatedAt = toTimestamp(snapshot?.locationTimestamp);
-  const messageAt = toTimestamp(messageTimestamp);
-  if (locatedAt && messageAt) {
-    return (
-      Math.abs(locatedAt.getTime() - messageAt.getTime()) <=
-      MAX_LOCATION_AGE_MS
-    );
-  }
-  return true;
-}
-
-export function sanitizeSharedLocation(
-  snapshot,
-  messageTimestamp,
-  now = new Date()
-) {
-  if (!snapshot || typeof snapshot !== "object") return null;
-  if (snapshot.isLocatingInProgress === true) return null;
-  if (!locationIsCurrent(snapshot, messageTimestamp, now)) return null;
-
-  const latitude = finiteCoordinate(snapshot.latitude, -90, 90);
-  const longitude = finiteCoordinate(snapshot.longitude, -180, 180);
-  const address = firstString(
-    snapshot.longAddress,
-    snapshot.address,
-    snapshot.shortAddress
+function coordinatePair(value) {
+  const text = firstString(value);
+  if (!text) return null;
+  const match = text.match(
+    /^\s*(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)\s*$/
   );
-  const name = firstString(snapshot.name);
-  if (latitude === null && longitude === null && !address && !name) return null;
-  // A single coordinate is not useful and is more likely a malformed payload.
-  if ((latitude === null) !== (longitude === null)) return null;
+  if (!match) return null;
+  const latitude = finiteCoordinate(match[1], -90, 90);
+  const longitude = finiteCoordinate(match[2], -180, 180);
+  return latitude === null || longitude === null
+    ? null
+    : { latitude, longitude };
+}
 
-  const locatedAt = toTimestamp(snapshot.locationTimestamp);
+function parseMapUrl(value) {
+  const url = boundedString(value, MAX_URL_LENGTH);
+  if (!url) return { url: null, name: null, address: null, coordinates: null };
+  try {
+    const parsed = new URL(url);
+    const scheme = parsed.protocol.toLowerCase();
+    if (scheme !== "http:" && scheme !== "https:" && scheme !== "maps:") {
+      return { url: null, name: null, address: null, coordinates: null };
+    }
+    const coordinates =
+      coordinatePair(parsed.searchParams.get("ll")) ??
+      coordinatePair(parsed.searchParams.get("coordinate")) ??
+      coordinatePair(parsed.searchParams.get("center")) ??
+      coordinatePair(parsed.searchParams.get("sll"));
+    const query = boundedString(parsed.searchParams.get("q"), MAX_TEXT_LENGTH);
+    return {
+      url,
+      name: query && !coordinatePair(query) ? query : null,
+      address: boundedString(
+        parsed.searchParams.get("address"),
+        MAX_TEXT_LENGTH
+      ),
+      coordinates,
+    };
+  } catch {
+    return { url: null, name: null, address: null, coordinates: null };
+  }
+}
+
+function visibleLayoutText(layout) {
+  if (!layout || typeof layout !== "object") return [];
+  const values = [];
+  for (const field of CARD_TEXT_FIELDS) {
+    const value = boundedString(layout[field], MAX_TEXT_LENGTH);
+    if (value && !values.includes(value)) values.push(value);
+  }
+  return values;
+}
+
+export function sanitizeMiniAppLocation(content) {
+  if (!isIMessageLocationCustom(content)) return null;
+  const miniApp = miniAppFromContent(content);
+  if (!miniApp) return { type: "location", resolved: false };
+
+  const mapUrl = parseMapUrl(miniApp.url);
+  const layout =
+    miniApp.layout && typeof miniApp.layout === "object"
+      ? miniApp.layout
+      : {};
+  const cardText = visibleLayoutText(layout);
+  const name = firstString(
+    mapUrl.name,
+    boundedString(layout.caption, MAX_TEXT_LENGTH),
+    boundedString(layout.imageTitle, MAX_TEXT_LENGTH)
+  );
+  const address = firstString(
+    mapUrl.address,
+    boundedString(layout.subcaption, MAX_TEXT_LENGTH),
+    boundedString(layout.imageSubtitle, MAX_TEXT_LENGTH)
+  );
+  const hasExactCardData = Boolean(
+    mapUrl.url || name || address || mapUrl.coordinates || cardText.length
+  );
+  if (!hasExactCardData) return { type: "location", resolved: false };
+
   return {
+    type: "location",
+    source: "map-card",
     resolved: true,
     ...(name ? { name } : {}),
-    ...(address ? { address } : {}),
-    ...(latitude !== null ? { latitude, longitude } : {}),
-    ...(locatedAt ? { locationTimestamp: locatedAt.toISOString() } : {}),
-    locationType: firstString(snapshot.locationType) || "unknown",
+    ...(address && address !== name ? { address } : {}),
+    ...(mapUrl.coordinates ?? {}),
+    ...(mapUrl.url ? { url: mapUrl.url } : {}),
+    ...(cardText.length ? { cardText } : {}),
   };
 }
 
-function withTimeout(promise, timeoutMs) {
-  let timer;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(
-      () => reject(new Error("location lookup timed out")),
-      timeoutMs
-    );
-    timer.unref?.();
-  });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-}
-
-export async function normalizeIMessageLocation(content, context = {}) {
-  if (!isIMessageLocationCustom(content)) return null;
-
-  // Deliberately omit the bundle id and raw Apple message from the normalized
-  // event. Hermes only needs to know that this is a location card.
-  const unresolved = { type: "location", resolved: false };
-  const senderId = firstString(context.senderId);
-  const client = selectIMessageLocationClient(context.app, context.phone);
-  if (!senderId || !client) return unresolved;
-
-  try {
-    const timeoutMs =
-      Number.isFinite(context.timeoutMs) && context.timeoutMs > 0
-        ? context.timeoutMs
-        : DEFAULT_TIMEOUT_MS;
-    const snapshot = await withTimeout(
-      client.locations.get(senderId),
-      timeoutMs
-    );
-    const normalized = sanitizeSharedLocation(
-      snapshot,
-      context.messageTimestamp,
-      context.now instanceof Date ? context.now : new Date()
-    );
-    return normalized
-      ? { type: "location", source: "shared-location", ...normalized }
-      : unresolved;
-  } catch {
-    // Not sharing, transient lookup failure, and unsupported private API all
-    // have the same safe fallback: recognize the card without fabricating a
-    // place or leaking an SDK error that may contain account metadata.
-    return unresolved;
-  }
+export async function normalizeIMessageLocation(content) {
+  return sanitizeMiniAppLocation(content);
 }
