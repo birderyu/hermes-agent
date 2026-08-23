@@ -66,6 +66,7 @@ import http from "node:http";
 import crypto from "node:crypto";
 import { once } from "node:events";
 import { patchSpectrumTs } from "./patch-spectrum-mixed-attachments.mjs";
+import { patchPollEmptyTitle } from "./patch-spectrum-poll-empty-title.mjs";
 import { chooseSendFormat } from "./send-format.mjs";
 import {
   classifyProbeRejection,
@@ -291,6 +292,22 @@ try {
 } catch (e) {
   console.error(
     "photon-sidecar: spectrum mixed attachment patch failed. " +
+      "Run `npm install` inside plugins/platforms/photon/sidecar/ or " +
+      "upgrade the Photon sidecar patch for the pinned spectrum-ts version. " +
+      "Original error: " +
+      (e && e.stack ? e.stack : String(e))
+  );
+}
+try {
+  const patchResult = patchPollEmptyTitle();
+  if (patchResult.patched) {
+    console.error(
+      `photon-sidecar: spectrum empty poll title patch applied: ${patchResult.file}`
+    );
+  }
+} catch (e) {
+  console.error(
+    "photon-sidecar: spectrum empty poll title patch failed. " +
       "Run `npm install` inside plugins/platforms/photon/sidecar/ or " +
       "upgrade the Photon sidecar patch for the pinned spectrum-ts version. " +
       "Original error: " +
