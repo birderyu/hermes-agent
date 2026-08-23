@@ -668,6 +668,8 @@ def _format_location_content(content: Dict[str, Any]) -> str:
     address = str(content.get("address") or "").strip()
     latitude = content.get("latitude")
     longitude = content.get("longitude")
+    url = str(content.get("url") or "").strip()
+    card_text = content.get("cardText")
     if name:
         parts.append(f"Name: {name}")
     if address:
@@ -676,11 +678,12 @@ def _format_location_content(content: Dict[str, Any]) -> str:
         parts.append(f"latitude: {latitude}")
         parts.append(f"longitude: {longitude}")
         parts.append(f"Map: https://maps.apple.com/?ll={latitude},{longitude}")
-    if content.get("source") == "shared-location":
-        parts.append(
-            "Note: Photon resolved the sender's current shared-location "
-            "snapshot; it may differ from a separate place pin in the card."
-        )
+    if url:
+        parts.append(f"Original map link: {url}")
+    if isinstance(card_text, list):
+        visible = [str(value).strip() for value in card_text if str(value).strip()]
+        if visible:
+            parts.append("Visible card text: " + " | ".join(visible))
     return "\n".join(parts)
 
 
@@ -1668,8 +1671,8 @@ class PhotonAdapter(BasePlatformAdapter):
                 )
         # A `hermes update` that bumps the spectrum-ts pin rewrites
         # package-lock.json but never reinstalls node_modules, so the sidecar
-        # spawns against stale deps and dies on every reconnect (the v8 patch
-        # script can't find @spectrum-ts/imessage/dist that only v8 ships).
+        # spawns against stale deps and dies on every reconnect (compatibility
+        # patch anchors and the installed @spectrum-ts/imessage can disagree).
         # Self-heal by reinstalling when the lockfile is newer than npm's
         # install marker. Runs off the event loop so a cold install can't
         # freeze every other platform's traffic.
