@@ -168,9 +168,57 @@ describe('Photon iMessage location normalization', () => {
           phone: 'shared',
           senderId: '+15550003333',
           settleMs: 0,
+          retryMs: 0,
         },
       ),
     ).resolves.toEqual({ type: 'location', resolved: false })
+  })
+
+  it('retries one transient lookup failure within the overall budget', async () => {
+    const get = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('snapshot still propagating'))
+      .mockResolvedValueOnce({
+        address: '1 Example Road',
+        isLocatingInProgress: false,
+      })
+    const app = {
+      __internal: {
+        platforms: new Map([
+          [
+            'imessage',
+            {
+              client: [
+                { phone: 'shared', client: { locations: { get } } },
+              ],
+            },
+          ],
+        ]),
+      },
+    }
+    await expect(
+      normalizeIMessageLocation(
+        {
+          type: 'custom',
+          raw: {
+            balloonBundleId: 'com.apple.findmy.FindMyMessagesApp',
+          },
+        },
+        {
+          app,
+          phone: 'shared',
+          senderId: '+15550003333',
+          settleMs: 0,
+          retryMs: 0,
+        },
+      ),
+    ).resolves.toEqual({
+      type: 'location',
+      source: 'shared-location',
+      resolved: true,
+      address: '1 Example Road',
+    })
+    expect(get).toHaveBeenCalledTimes(2)
   })
 
   it('rejects non-map custom URLs while keeping visible text', () => {
