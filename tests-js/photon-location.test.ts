@@ -102,7 +102,9 @@ describe('Photon iMessage location normalization', () => {
     const get = vi.fn().mockResolvedValue({
       address: 'short address',
       longAddress: '1 Example Road',
-      isLocatingInProgress: false,
+      // Photon can expose a usable legacy address while it continues trying
+      // to refine coordinates. The address must not be discarded.
+      isLocatingInProgress: true,
       locationType: 'legacy',
       privateMetadata: 'must-not-forward',
     })
