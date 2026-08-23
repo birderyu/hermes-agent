@@ -334,6 +334,37 @@ def _richlink_url_from_content(content: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _format_location_content(content: Dict[str, Any]) -> str:
+    """Render a privacy-bounded Photon location event for the agent."""
+    parts = ["[The user shared an iMessage location card.]"]
+    if content.get("resolved") is not True:
+        parts.append(
+            "Photon recognized the card, but iMessage did not expose its "
+            "address or coordinates. Ask the user to send the address or an "
+            "Apple Maps link if the exact place is needed."
+        )
+        return "\n".join(parts)
+
+    name = str(content.get("name") or "").strip()
+    address = str(content.get("address") or "").strip()
+    latitude = content.get("latitude")
+    longitude = content.get("longitude")
+    if name:
+        parts.append(f"Name: {name}")
+    if address:
+        parts.append(f"Address: {address}")
+    if isinstance(latitude, (int, float)) and isinstance(longitude, (int, float)):
+        parts.append(f"latitude: {latitude}")
+        parts.append(f"longitude: {longitude}")
+        parts.append(f"Map: https://maps.apple.com/?ll={latitude},{longitude}")
+    if content.get("source") == "shared-location":
+        parts.append(
+            "Note: Photon resolved the sender's current shared-location "
+            "snapshot; it may differ from a separate place pin in the card."
+        )
+    return "\n".join(parts)
+
+
 def _is_richlink_preview_attachment(payload: Dict[str, Any]) -> bool:
     # Preview art can carry an opaque MIME; the name/id marker is the reliable signal,
     # the recent-link window guards real files.
@@ -409,6 +440,10 @@ def _normalize_group_content(content: Dict[str, Any]) -> _Normalized:
             text_parts.append(item_content.get("text") or "")
         elif item_type == "richlink":
             text_parts.append(_format_richlink_content(item_content))
+        elif item_type == "location":
+            text_parts.append(_format_location_content(item_content))
+            if mtype == MessageType.TEXT:
+                mtype = MessageType.LOCATION
         elif item_type:
             text_parts.append(f"[Photon content type not handled: {item_type}]")
     if media_urls and mtype == MessageType.TEXT:
@@ -421,6 +456,7 @@ _CONTENT_NORMALIZERS: Dict[Any, Callable[[Dict[str, Any]], _Normalized]] = {
     "text": lambda c: (c.get("text") or "", MessageType.TEXT, [], []),
     "attachment": _normalize_binary_payload, "voice": _normalize_binary_payload,
     "richlink": lambda c: (_format_richlink_content(c), MessageType.TEXT, [], []),
+    "location": lambda c: (_format_location_content(c), MessageType.LOCATION, [], []),
     "group": _normalize_group_content,
 }
 _BINARY_CONTENT_TYPES = {"attachment", "voice", "group"}  # may decode/cache media bytes → run off the event loop
@@ -742,7 +778,7 @@ class PhotonAdapter(BasePlatformAdapter):
     async def _dispatch_inbound(self, event: Dict[str, Any]) -> None:
         """Normalize a sidecar inbound event ``{messageId, space: {id, type: dm|group, phone},
         sender: {id}, content: {type: text|attachment|voice|reaction|richlink|group|
-        poll_option|read, ...}, timestamp}`` and dispatch it. Attachment/voice bytes arrive
+        poll_option|read|location, ...}, timestamp}`` and dispatch it. Attachment/voice bytes arrive
         inline as base64 ``data`` under the sidecar's cap; otherwise metadata only → marker."""
         space = event.get("space") or {}
         sender = event.get("sender") or {}

@@ -67,6 +67,7 @@ import crypto from "node:crypto";
 import { once } from "node:events";
 import { patchSpectrumTs } from "./patch-spectrum-mixed-attachments.mjs";
 import { patchPollEmptyTitle } from "./patch-spectrum-poll-empty-title.mjs";
+import { normalizeIMessageLocation } from "./location.mjs";
 import { chooseSendFormat } from "./send-format.mjs";
 import {
   classifyProbeRejection,
@@ -532,7 +533,7 @@ function reactionTargetText(target) {
     : text;
 }
 
-async function normalizeContent(content) {
+async function normalizeContent(content, context = {}) {
   if (!content || typeof content !== "object") {
     return { type: "unknown" };
   }
@@ -557,7 +558,7 @@ async function normalizeContent(content) {
     for (const item of Array.isArray(content.items) ? content.items : []) {
       items.push({
         id: item && typeof item === "object" ? item.id ?? null : null,
-        content: await normalizeContent(item?.content),
+        content: await normalizeContent(item?.content, context),
       });
     }
     return { type: "group", items };
@@ -611,6 +612,10 @@ async function normalizeContent(content) {
         : [],
     };
   }
+  if (content.type === "custom") {
+    const location = await normalizeIMessageLocation(content, context);
+    if (location) return location;
+  }
   return { type: content.type || "unknown" };
 }
 
@@ -651,7 +656,12 @@ async function normalizeEvent(space, message) {
         phone: space.phone ?? msgSpace.phone ?? null,
       },
       sender: { id: message.sender ? message.sender.id : null },
-      content: await normalizeContent(message.content),
+      content: await normalizeContent(message.content, {
+        app,
+        phone: space.phone ?? msgSpace.phone ?? null,
+        senderId: message.sender?.id ?? null,
+        messageTimestamp: ts,
+      }),
       timestamp:
         ts instanceof Date ? ts.toISOString() : ts ? String(ts) : null,
     };
