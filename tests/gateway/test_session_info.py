@@ -1,7 +1,9 @@
 """Tests for GatewayRunner._format_session_info — session config surfacing."""
 
-import pytest
+from types import SimpleNamespace
 from unittest.mock import patch
+
+import pytest
 
 from gateway.run import GatewayRunner
 
@@ -63,6 +65,24 @@ class TestFormatSessionInfo:
             info = runner._format_session_info()
         assert "localhost:11434" in info
         assert "8K" in info
+
+    def test_chinese_labels_and_detected_source(self, runner, monkeypatch):
+        monkeypatch.setenv("HERMES_LANGUAGE", "zh")
+        resolved = SimpleNamespace(
+            model="gpt-5.6-sol",
+            provider="openai-codex",
+            base_url="",
+            context_length=900_000,
+            context_source="detected",
+        )
+        with patch("gateway.run._resolve_gateway_model_context", return_value=resolved):
+            info = runner._format_session_info()
+
+        assert info == (
+            "◆ 模型：`gpt-5.6-sol`\n"
+            "◆ 提供方：openai-codex\n"
+            "◆ 上下文：900K tokens（自动检测）"
+        )
 
     def test_named_custom_provider_keeps_context_pin_without_model_base_url(
         self, runner, tmp_path
@@ -154,3 +174,32 @@ class TestResetNoticeSessionInfo:
         assert "anthropic" in info
         assert "base-model" not in info
 
+
+class TestAutoResetNotice:
+
+    @pytest.fixture()
+    def policy(self):
+        return SimpleNamespace(at_hour=4, idle_minutes=1440)
+
+    def test_chinese_daily_notice_is_clear_and_history_accurate(
+        self, runner, policy, monkeypatch
+    ):
+        monkeypatch.setenv("HERMES_LANGUAGE", "zh")
+
+        notice = runner._format_auto_reset_notice("daily", policy)
+
+        assert "每日 04:00 定时重置" in notice
+        assert "仍保存在历史记录中" in notice
+        assert "/resume" in notice
+        assert "session_reset" in notice
+
+    def test_english_notice_no_longer_claims_history_was_cleared(
+        self, runner, policy, monkeypatch
+    ):
+        monkeypatch.setenv("HERMES_LANGUAGE", "en")
+
+        notice = runner._format_auto_reset_notice("daily", policy)
+
+        assert "daily schedule at 04:00" in notice
+        assert "remains saved in history" in notice
+        assert "Conversation history cleared" not in notice
