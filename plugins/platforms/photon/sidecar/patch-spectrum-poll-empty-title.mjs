@@ -6,7 +6,7 @@
 // option. The fallback below is internal cache metadata only: it does not
 // change the poll bubble, question, or choice text shown to the user.
 //
-// The SDK is pinned to spectrum-ts 8.0.0. Anchors match that published output
+// The SDK is pinned to spectrum-ts 12.8.0. Anchors match that published output
 // exactly and fail loudly if a future version reshapes the cache path.
 import fs from "node:fs";
 import path from "node:path";

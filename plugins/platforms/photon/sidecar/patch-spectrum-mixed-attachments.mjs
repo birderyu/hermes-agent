@@ -144,6 +144,20 @@ export function patchSpectrumTs(root = scriptDir()) {
     const CRLF = CR + "\n";
     const usedCRLF = raw.includes(CRLF);
     const original = usedCRLF ? raw.split(CRLF).join("\n") : raw;
+    // spectrum-ts 12 preserves interleaved text/attachments natively through
+    // `toOrderedParts` + `buildUnwrappedContentMessage`. Keep this patcher as
+    // a compatibility shim for older installed trees, but do not rewrite the
+    // newer mapper.
+    if (
+      original.includes("const toOrderedParts =") &&
+      original.includes("const buildUnwrappedContentMessage = async")
+    ) {
+      return {
+        patched: false,
+        file,
+        reason: "upstream preserves ordered parts",
+      };
+    }
     if (!original.includes("const toInboundMessages = async") ||
         !original.includes("const rebuildFromAppleMessage = async")) {
       continue;

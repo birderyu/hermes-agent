@@ -110,11 +110,13 @@ async def test_dispatch_resolved_location_dm(monkeypatch: pytest.MonkeyPatch) ->
     event["content"] = {
         "type": "location",
         "resolved": True,
-        "source": "shared-location",
+        "source": "map-card",
         "name": "Test Place",
         "address": "1 Example Road",
         "latitude": 31.2304,
         "longitude": 121.4737,
+        "url": "https://maps.apple.com/?q=Test%20Place",
+        "cardText": ["Test Place", "1 Example Road"],
     }
 
     await adapter._dispatch_inbound(event)
@@ -126,7 +128,8 @@ async def test_dispatch_resolved_location_dm(monkeypatch: pytest.MonkeyPatch) ->
     assert "Name: Test Place" in message.text
     assert "Address: 1 Example Road" in message.text
     assert "https://maps.apple.com/?ll=31.2304,121.4737" in message.text
-    assert "may differ from a separate place pin" in message.text
+    assert "Original map link: https://maps.apple.com/?q=Test%20Place" in message.text
+    assert "Visible card text: Test Place | 1 Example Road" in message.text
 
 
 @pytest.mark.asyncio

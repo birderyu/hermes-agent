@@ -46,8 +46,8 @@
 // On SIGINT/SIGTERM the sidecar calls `app.stop()` (3s graceful) before
 // exiting. Logs go to stderr; Python supervises restart.
 //
-// Requires a pinned spectrum-ts version — the SDK ships breaking majors; see
-// README "Upgrading spectrum-ts".
+// Requires spectrum-ts 12.x — pinned exactly in package.json because the SDK
+// ships breaking majors; see README "Upgrading spectrum-ts".
 //
 // Env vars (required):
 //   PHOTON_PROJECT_ID      (== the project's spectrumProjectId)
@@ -67,6 +67,7 @@ import crypto from "node:crypto";
 import { once } from "node:events";
 import { patchSpectrumTs } from "./patch-spectrum-mixed-attachments.mjs";
 import { patchPollEmptyTitle } from "./patch-spectrum-poll-empty-title.mjs";
+import { patchMiniAppInbound } from "./patch-spectrum-mini-app-inbound.mjs";
 import { normalizeIMessageLocation } from "./location.mjs";
 import { chooseSendFormat } from "./send-format.mjs";
 import {
@@ -309,6 +310,22 @@ try {
 } catch (e) {
   console.error(
     "photon-sidecar: spectrum empty poll title patch failed. " +
+      "Run `npm install` inside plugins/platforms/photon/sidecar/ or " +
+      "upgrade the Photon sidecar patch for the pinned spectrum-ts version. " +
+      "Original error: " +
+      (e && e.stack ? e.stack : String(e))
+  );
+}
+try {
+  const patchResult = patchMiniAppInbound();
+  if (patchResult.patched) {
+    console.error(
+      `photon-sidecar: spectrum mini-app inbound patch applied: ${patchResult.file}`
+    );
+  }
+} catch (e) {
+  console.error(
+    "photon-sidecar: spectrum mini-app inbound patch failed. " +
       "Run `npm install` inside plugins/platforms/photon/sidecar/ or " +
       "upgrade the Photon sidecar patch for the pinned spectrum-ts version. " +
       "Original error: " +

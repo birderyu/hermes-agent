@@ -7,14 +7,14 @@
   "main": "index.mjs",
   "scripts": {
     "start": "node index.mjs",
-    "postinstall": "node patch-spectrum-mixed-attachments.mjs && node patch-spectrum-poll-empty-title.mjs",
-    "test": "node --test patch-spectrum-poll-empty-title.test.mjs"
+    "postinstall": "node patch-spectrum-mixed-attachments.mjs && node patch-spectrum-poll-empty-title.mjs && node patch-spectrum-mini-app-inbound.mjs",
+    "test": "node --test *.test.mjs"
   },
   "engines": {
     "node": ">=18.17"
   },
   "dependencies": {
-    "spectrum-ts": "12.7.0"
+    "spectrum-ts": "12.8.0"
   },
   "overrides": {
     "protobufjs": "8.7.1",
