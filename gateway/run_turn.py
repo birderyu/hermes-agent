@@ -558,11 +558,7 @@ class GatewayTurnMixin:
             should_notify = reset_reason == "suspended"
             adapter = self._delivery_adapter_for(source) if should_notify else None
             if adapter:
-                notice = (
-                    "◐ Session reset after being stopped. "
-                    f"Conversation history cleared.\n"
-                    f"Use /resume to browse and restore a previous session.\n"
-                )
+                notice = self._format_auto_reset_notice(reset_reason, None)
                 with suppress(Exception):
                     session_info = await asyncio.to_thread(self._reset_notice_session_info, source)
                     if session_info:
@@ -2325,6 +2321,33 @@ class GatewayTurnMixin:
         from gateway.run import _profile_runtime_scope
         return _profile_runtime_scope(self._resolve_profile_home_for_source(source), {})
 
+    def _format_auto_reset_notice(self, reset_reason: str, policy: Any) -> str:
+        """Return a localized, history-accurate automatic-reset notice."""
+        if reset_reason == "suspended":
+            reason_text = t("gateway.reset.auto_reason_suspended")
+        elif reset_reason == "resume_pending_expired":
+            reason_text = t("gateway.reset.auto_reason_recovery_timeout")
+        elif reset_reason == "daily":
+            reason_text = t(
+                "gateway.reset.auto_reason_daily",
+                hour=f"{policy.at_hour:02d}",
+            )
+        else:
+            hours = policy.idle_minutes // 60
+            mins = policy.idle_minutes % 60
+            duration = (
+                f"{hours}h"
+                if not mins
+                else f"{hours}h {mins}m"
+                if hours
+                else f"{mins}m"
+            )
+            reason_text = t(
+                "gateway.reset.auto_reason_idle",
+                duration=duration,
+            )
+        return t("gateway.reset.auto_notice", reason=reason_text)
+
     def _reset_notice_session_info(self, source: SessionSource) -> str:
         """Session-info block for the auto-reset notice, resolved inside the profile serving ``source``.
 
@@ -2338,18 +2361,23 @@ class GatewayTurnMixin:
         from gateway.run import _resolve_gateway_model_context
         resolved = _resolve_gateway_model_context()
         context_length = resolved.context_length
-        ctx_source = {
-            "config": "config",
-            "default": "default — set model.context_length in config to override",
-        }.get(resolved.context_source, "detected")
+        ctx_source = t(
+            f"gateway.reset.context_source_{resolved.context_source}"
+            if resolved.context_source in {"config", "default"}
+            else "gateway.reset.context_source_detected"
+        )
         ctx_display = (
             f"{context_length / 1_000_000:.1f}M" if context_length >= 1_000_000
             else f"{context_length // 1_000}K" if context_length >= 1_000 else str(context_length)
         )
         lines = [
-            f"◆ Model: `{resolved.model}`",
-            f"◆ Provider: {resolved.provider or 'openrouter'}",
-            f"◆ Context: {ctx_display} tokens ({ctx_source})",
+            t(
+                "gateway.reset.session_info",
+                model=resolved.model,
+                provider=resolved.provider or "openrouter",
+                context=ctx_display,
+                source=ctx_source,
+            )
         ]
         if (resolved.provider or "") == "moa":
             # The preset name hides who pays: the aggregator runs every tool-loop step (#112359).
@@ -2360,7 +2388,7 @@ class GatewayTurnMixin:
                 lines.append(f"◆ Acting model (billed for the run): {agg.get('provider')}:{agg.get('model')}")
         base_url = resolved.base_url
         if base_url and base_url_hostname(base_url) in ("localhost", "127.0.0.1", "0.0.0.0"):
-            lines.append(f"◆ Endpoint: {base_url}")
+            lines.append(t("gateway.reset.session_info_endpoint", endpoint=base_url))
         return "\n".join(lines)
 
     async def _run_background_task(
