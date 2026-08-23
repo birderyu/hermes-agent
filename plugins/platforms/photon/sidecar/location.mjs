@@ -17,7 +17,7 @@ const CARD_TEXT_FIELDS = [
 const MAX_URL_LENGTH = 4096;
 const MAX_TEXT_LENGTH = 1000;
 const SHARED_LOCATION_SETTLE_MS = 750;
-const SHARED_LOCATION_TIMEOUT_MS = 5000;
+const SHARED_LOCATION_TIMEOUT_MS = 12000;
 
 function firstString(...values) {
   for (const value of values) {
