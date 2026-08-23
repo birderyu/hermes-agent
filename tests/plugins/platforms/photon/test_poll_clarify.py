@@ -5,21 +5,21 @@ multiple-choice ``clarify`` renders as that poll; the user taps a choice and
 the vote streams back inbound as a ``poll_option`` event. These tests cover
 both directions without spawning the Node sidecar or binding ports:
 
-  * outbound — ``send_clarify`` with choices POSTs ``/send-poll`` and flips the
-    clarify into text-capture mode; with no choices it stays plain text;
-  * inbound — the first ``poll_option`` selection per sender for a poll Hermes
-    sent is dispatched as plain text (so the gateway clarify-intercept resolves
-    it); later changes, stale/untracked polls, deselections, and empty choices
-    are dropped.
+  * clarify polls resolve their registered prompt directly, and late changes
+    remain owned by that closed prompt instead of becoming new user turns;
+  * ordinary polls keep their native selection/change stream;
+  * multi-select clarifies collect selections until the explicit completion
+    option is tapped.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+import json
+from typing import Any, Dict, List, Tuple
 
 import pytest
 
 from gateway.config import PlatformConfig
-from gateway.platforms.base import MessageEvent, MessageType, SendResult
+from gateway.platforms.base import MessageEvent, SendResult
 from plugins.platforms.photon.adapter import PhotonAdapter
 
 
@@ -66,35 +66,50 @@ def _poll_option_event(
 
 
 # ---------------------------------------------------------------------------
-# Inbound: a poll vote becomes the clarify answer.
+# Inbound: clarify polls and ordinary polls have separate lifecycles.
 
 
 @pytest.mark.asyncio
-async def test_poll_vote_dispatched_as_choice_text(
+async def test_clarify_poll_resolves_directly_and_late_change_stays_owned(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A poll selection is forwarded as a plain-text message carrying the
-    chosen option, so the gateway clarify text-intercept can resolve it."""
+    import tools.clarify_gateway as cg
+
     adapter = _make_adapter(monkeypatch)
     captured = _capture(adapter, monkeypatch)
     adapter._record_sent_message("spc-msg-poll")
-
-    await adapter._dispatch_inbound(
-        _poll_option_event(title="Yes — native tappable buttons")
+    entry = cg.register(
+        "clar-1", "sess-1", "Pick one", ["Cancel", "Proceed"]
+    )
+    adapter._remember_clarify_poll(
+        "spc-msg-poll",
+        clarify_id="clar-1",
+        session_key="sess-1",
+        choices=["Cancel", "Proceed"],
+        multi_select=False,
+        done_label=None,
     )
 
-    assert len(captured) == 1
-    ev = captured[0]
-    assert ev.text == "Yes — native tappable buttons"
-    assert ev.message_type == MessageType.TEXT
-    assert ev.source.chat_id == "+155****4567"
+    try:
+        await adapter._dispatch_inbound(
+            _poll_option_event(title="Cancel", event_suffix="vote-1")
+        )
+        await adapter._dispatch_inbound(
+            _poll_option_event(title="Proceed", event_suffix="vote-2")
+        )
+
+        assert entry.response == "Cancel"
+        assert entry.event.is_set()
+        assert captured == []
+    finally:
+        cg.clear_session("sess-1")
 
 
 @pytest.mark.asyncio
-async def test_poll_vote_change_after_first_selection_is_dropped(
+async def test_ordinary_poll_preserves_multiple_selection_events(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Changing an iMessage vote must not create a second Hermes turn."""
+    """The clarify fix must not impose first-vote-wins on native polls."""
     adapter = _make_adapter(monkeypatch)
     captured = _capture(adapter, monkeypatch)
     adapter._record_sent_message("spc-msg-poll")
@@ -106,11 +121,11 @@ async def test_poll_vote_change_after_first_selection_is_dropped(
         _poll_option_event(title="Proceed", event_suffix="vote-2")
     )
 
-    assert [event.text for event in captured] == ["Cancel"]
+    assert [event.text for event in captured] == ["Cancel", "Proceed"]
 
 
 @pytest.mark.asyncio
-async def test_group_poll_allows_one_first_vote_per_sender(
+async def test_group_ordinary_poll_preserves_each_selection_event(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     adapter = _make_adapter(monkeypatch)
@@ -226,5 +241,131 @@ async def test_send_clarify_with_choices_sends_native_poll(
     assert space_id == "+155****4567"
     assert title == "Pick one"
     assert options == ["A", "B", "C"]
-    # The vote returns as text, so text-capture must be enabled.
+    state = adapter._clarify_polls["spc-msg-poll"]
+    assert state["clarify_id"] == "clar-1"
+    assert state["multi_select"] is False
+    # Typed replies remain available as Photon's free-form alternative.
     assert marked == ["clar-1"]
+
+
+@pytest.mark.asyncio
+async def test_multi_select_clarify_collects_until_done(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tools.clarify_gateway as cg
+
+    adapter = _make_adapter(monkeypatch)
+    captured = _capture(adapter, monkeypatch)
+    poll_calls = _stub_sidecar_poll(adapter, monkeypatch)
+    adapter._record_sent_message("spc-msg-poll")
+    entry = cg.register(
+        "clar-multi",
+        "sess-multi",
+        "Pick several",
+        ["A", "B", "C"],
+        multi_select=True,
+    )
+
+    try:
+        result = await adapter.send_clarify(
+            chat_id="+155****4567",
+            question="Pick several",
+            choices=["A", "B", "C"],
+            clarify_id="clar-multi",
+            session_key="sess-multi",
+        )
+
+        assert result.success
+        assert len(poll_calls) == 1
+        _space_id, title, options = poll_calls[0]
+        assert "可多选" in title
+        assert options == ["A", "B", "C", "✅ 完成选择"]
+
+        await adapter._dispatch_inbound(
+            _poll_option_event(title="A", event_suffix="select-a")
+        )
+        await adapter._dispatch_inbound(
+            _poll_option_event(title="B", event_suffix="select-b")
+        )
+        await adapter._dispatch_inbound(
+            _poll_option_event(
+                title="A", selected=False, event_suffix="deselect-a"
+            )
+        )
+        assert not entry.event.is_set()
+
+        await adapter._dispatch_inbound(
+            _poll_option_event(
+                title="✅ 完成选择", event_suffix="submit"
+            )
+        )
+        assert json.loads(entry.response or "") == ["B"]
+        assert entry.event.is_set()
+
+        # A change after submission is still owned by the closed clarify.
+        await adapter._dispatch_inbound(
+            _poll_option_event(title="C", event_suffix="late-change")
+        )
+        assert json.loads(entry.response or "") == ["B"]
+        assert captured == []
+    finally:
+        cg.clear_session("sess-multi")
+
+
+@pytest.mark.asyncio
+async def test_multi_select_done_without_choices_submits_empty_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tools.clarify_gateway as cg
+
+    adapter = _make_adapter(monkeypatch)
+    captured = _capture(adapter, monkeypatch)
+    entry = cg.register(
+        "clar-empty",
+        "sess-empty",
+        "Pick several",
+        ["A", "B"],
+        multi_select=True,
+    )
+    adapter._record_sent_message("spc-msg-poll")
+    adapter._remember_clarify_poll(
+        "spc-msg-poll",
+        clarify_id="clar-empty",
+        session_key="sess-empty",
+        choices=["A", "B"],
+        multi_select=True,
+        done_label="✅ 完成选择",
+    )
+
+    try:
+        await adapter._dispatch_inbound(
+            _poll_option_event(title="✅ 完成选择", event_suffix="submit")
+        )
+
+        assert json.loads(entry.response or "") == []
+        assert entry.event.is_set()
+        assert captured == []
+    finally:
+        cg.clear_session("sess-empty")
+
+
+@pytest.mark.asyncio
+async def test_failed_native_clarify_falls_back_without_poll_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = _make_adapter(monkeypatch)
+    poll_calls = _stub_sidecar_poll(adapter, monkeypatch, ok=False)
+    text_sends = _stub_sidecar_text(adapter, monkeypatch)
+
+    result = await adapter.send_clarify(
+        chat_id="+155****4567",
+        question="Pick one",
+        choices=["A", "B"],
+        clarify_id="clar-fallback",
+        session_key="sess-fallback",
+    )
+
+    assert result.success
+    assert len(poll_calls) == 1
+    assert len(text_sends) == 1
+    assert adapter._clarify_polls == {}
