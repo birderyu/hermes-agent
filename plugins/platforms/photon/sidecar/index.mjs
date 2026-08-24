@@ -69,6 +69,10 @@ import { patchSpectrumTs } from "./patch-spectrum-mixed-attachments.mjs";
 import { patchPollEmptyTitle } from "./patch-spectrum-poll-empty-title.mjs";
 import { patchMiniAppInbound } from "./patch-spectrum-mini-app-inbound.mjs";
 import { normalizeIMessageLocation } from "./location.mjs";
+import {
+  messageTextPreview,
+  normalizeReplyContent,
+} from "./reply-content.mjs";
 import { chooseSendFormat } from "./send-format.mjs";
 import {
   classifyProbeRejection,
@@ -515,41 +519,6 @@ async function normalizeBinaryContent(content) {
   return meta;
 }
 
-// Best-effort text preview of a reaction's resolved target Message, so the
-// Python adapter can populate the gateway's `reply_to_text` (context: WHAT was
-// tapped back). The SDK only emits a reaction once it has resolved the full
-// target Message (toReactionMessages bails otherwise), so `target.content` is
-// hydrated here — no extra round trip. Handles plain text and our patched mixed
-// text+attachment groups (first text child); null for attachment/voice-only
-// targets. Capped so one long bubble can't balloon the NDJSON line.
-const REACTION_TARGET_TEXT_CAP = 2000;
-function reactionTargetText(target) {
-  const c = target && typeof target === "object" ? target.content : null;
-  if (!c || typeof c !== "object") return null;
-  let text = null;
-  if (c.type === "text") {
-    text = c.text;
-  } else if (c.type === "richlink") {
-    text = c.url;
-  } else if (c.type === "group") {
-    for (const item of Array.isArray(c.items) ? c.items : []) {
-      const ic = item && typeof item === "object" ? item.content : null;
-      if (ic && ic.type === "text" && ic.text) {
-        text = ic.text;
-        break;
-      }
-      if (ic && ic.type === "richlink" && ic.url) {
-        text = ic.url;
-        break;
-      }
-    }
-  }
-  if (typeof text !== "string" || !text) return null;
-  return text.length > REACTION_TARGET_TEXT_CAP
-    ? text.slice(0, REACTION_TARGET_TEXT_CAP)
-    : text;
-}
-
 async function normalizeContent(content, context = {}) {
   if (!content || typeof content !== "object") {
     return { type: "unknown" };
@@ -591,6 +560,11 @@ async function normalizeContent(content, context = {}) {
       targetDirection: content.target?.direction ?? null,
     };
   }
+  if (content.type === "reply") {
+    return await normalizeReplyContent(content, (inner) =>
+      normalizeContent(inner, context)
+    );
+  }
   if (content.type === "reaction") {
     const target = content.target;
     return {
@@ -603,7 +577,7 @@ async function normalizeContent(content, context = {}) {
       targetDirection: target?.direction ?? null,
       // Text of the reacted-to message, so Python can correlate the tapback to
       // the gateway's reply_to_text. Null for attachment/voice-only targets.
-      targetText: reactionTargetText(target),
+      targetText: messageTextPreview(target),
     };
   }
   // A user tapping a poll choice arrives as `poll_option` carrying the chosen
