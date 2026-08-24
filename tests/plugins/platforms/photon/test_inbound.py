@@ -67,6 +67,132 @@ async def test_dispatch_text_dm(monkeypatch: pytest.MonkeyPatch) -> None:
     assert src.user_id == "+15551234567"
 
 
+def _reply_event(
+    inner_content: Dict[str, Any],
+    *,
+    target_id: str | None = "bot-msg-1",
+    target_direction: str | None = "outbound",
+    target_text: str | None = "the bot's earlier answer",
+) -> Dict[str, Any]:
+    event = _dm_event("", msg_id="spc-msg-reply")
+    event["content"] = {
+        "type": "reply",
+        "content": inner_content,
+        "targetMessageId": target_id,
+        "targetDirection": target_direction,
+        "targetText": target_text,
+    }
+    return event
+
+
+@pytest.mark.asyncio
+async def test_dispatch_text_reply_preserves_user_text_and_target_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = _make_adapter(monkeypatch)
+    captured = _capture(adapter, monkeypatch)
+
+    await adapter._dispatch_inbound(
+        _reply_event({"type": "text", "text": "this is my actual reply"})
+    )
+
+    assert len(captured) == 1
+    event = captured[0]
+    assert event.text == "this is my actual reply"
+    assert event.message_type == MessageType.TEXT
+    assert event.reply_to_message_id == "bot-msg-1"
+    assert event.reply_to_text == "the bot's earlier answer"
+    assert event.reply_to_is_own_message is True
+
+
+@pytest.mark.asyncio
+async def test_dispatch_reply_to_inbound_message_is_not_marked_as_ours(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = _make_adapter(monkeypatch)
+    captured = _capture(adapter, monkeypatch)
+
+    await adapter._dispatch_inbound(
+        _reply_event(
+            {"type": "text", "text": "reply to another person"},
+            target_id="human-msg-1",
+            target_direction="inbound",
+            target_text="another person's message",
+        )
+    )
+
+    assert len(captured) == 1
+    event = captured[0]
+    assert event.text == "reply to another person"
+    assert event.reply_to_message_id == "human-msg-1"
+    assert event.reply_to_text == "another person's message"
+    assert event.reply_to_is_own_message is False
+
+
+@pytest.mark.asyncio
+async def test_dispatch_attachment_reply_reuses_media_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = _make_adapter(monkeypatch)
+    captured = _capture(adapter, monkeypatch)
+
+    await adapter._dispatch_inbound(
+        _reply_event(
+            {
+                "type": "attachment",
+                "name": "document.pdf",
+                "mimeType": "application/pdf",
+                "size": 123,
+            }
+        )
+    )
+
+    assert len(captured) == 1
+    event = captured[0]
+    assert event.message_type == MessageType.DOCUMENT
+    assert "document.pdf" in event.text
+    assert event.reply_to_message_id == "bot-msg-1"
+    assert event.reply_to_is_own_message is True
+
+
+@pytest.mark.asyncio
+async def test_dispatch_reply_without_target_still_delivers_inner_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = _make_adapter(monkeypatch)
+    captured = _capture(adapter, monkeypatch)
+
+    await adapter._dispatch_inbound(
+        _reply_event(
+            {"type": "text", "text": "target unavailable but text survives"},
+            target_id=None,
+            target_direction=None,
+            target_text=None,
+        )
+    )
+
+    assert len(captured) == 1
+    event = captured[0]
+    assert event.text == "target unavailable but text survives"
+    assert event.reply_to_message_id is None
+    assert event.reply_to_text is None
+    assert event.reply_to_is_own_message is False
+
+
+@pytest.mark.asyncio
+async def test_dispatch_malformed_reply_is_dropped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = _make_adapter(monkeypatch)
+    captured = _capture(adapter, monkeypatch)
+    event = _dm_event("", msg_id="spc-msg-malformed-reply")
+    event["content"] = {"type": "reply", "content": None}
+
+    await adapter._dispatch_inbound(event)
+
+    assert captured == []
+
+
 @pytest.mark.asyncio
 async def test_dispatch_read_receipt_does_not_wake_agent(
     monkeypatch: pytest.MonkeyPatch,

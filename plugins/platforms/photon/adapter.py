@@ -762,8 +762,47 @@ class PhotonAdapter(BasePlatformAdapter):
                                        user_id=sender_id, user_name=sender_id or None, message_id=message_id)
             return MessageEvent(text=text, message_type=mtype, source=source, message_id=message_id,
                                 raw_message=event, timestamp=timestamp, **kwargs)
-        if ctype in {"read", "read_receipt"}:  # presence signal, not a user turn (receipts for our sends)
-            logger.debug("[photon] outbound message read: %s", content.get("targetMessageId") or "unknown")
+        reply_to_message_id: Optional[str] = None
+        reply_to_text: Optional[str] = None
+        reply_to_is_own_message = False
+        if ctype == "reply":
+            # Spectrum 12.8 wraps an iMessage threaded reply as
+            # ``{type: "reply", content: <actual user content>, target: ...}``.
+            # The sidecar exposes a privacy-bounded target summary alongside
+            # the recursively normalized inner content. Unwrap before the
+            # normal text/media/location dispatch so the user's words are not
+            # replaced by an "unhandled: reply" placeholder.
+            inner_content = content.get("content")
+            if not isinstance(inner_content, dict):
+                logger.warning("[photon] ignoring malformed iMessage reply")
+                return
+            target_id = content.get("targetMessageId")
+            reply_to_message_id = (
+                target_id if isinstance(target_id, str) and target_id else None
+            )
+            target_text = content.get("targetText")
+            reply_to_text = (
+                target_text
+                if isinstance(target_text, str) and target_text
+                else None
+            )
+            reply_to_is_own_message = bool(
+                content.get("targetDirection") == "outbound"
+                or (
+                    reply_to_message_id
+                    and reply_to_message_id in self._sent_message_ids
+                )
+            )
+            content = inner_content
+            ctype = content.get("type")
+        if ctype in {"read", "read_receipt"}:
+            # Read receipts are presence signals, not a user turn. The sidecar
+            # only forwards receipts for messages we sent, so logging the
+            # target is enough for observability without waking the agent.
+            logger.debug(
+                "[photon] outbound message read: %s",
+                content.get("targetMessageId") or "unknown",
+            )
             return
         if ctype == "reaction":
             # Only tapbacks on messages WE sent are addressed to the bot. Checked before the
@@ -842,7 +881,11 @@ class PhotonAdapter(BasePlatformAdapter):
                 return
             text = self._clean_mention_text(text)
         self._record_recent_richlink(space_id, _richlink_url_from_content(content) or text)
-        await self.handle_message(_event(text, mtype, media_urls=media_urls, media_types=media_types))
+        await self.handle_message(_event(
+            text, mtype, media_urls=media_urls, media_types=media_types,
+            reply_to_message_id=reply_to_message_id, reply_to_text=reply_to_text,
+            reply_to_is_own_message=reply_to_is_own_message,
+        ))
 
     # -- Sidecar lifecycle ---------------------------------------------------------
 
