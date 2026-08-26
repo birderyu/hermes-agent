@@ -13,6 +13,22 @@
 const URL_RE = /https?:\/\/[^\s)'"<>]+/i;
 
 /**
+ * Spectrum's iMessage voice sender always uploads M4A bytes: non-M4A input is
+ * transcoded before upload.  Keep the uploaded filename aligned with those
+ * bytes, otherwise Messages accepts the attachment but renders it as 0s.
+ *
+ * @param {string} path       local source path
+ * @param {string|undefined} name caller-supplied display name
+ * @returns {string}
+ */
+export function normalizeVoiceAttachmentName(path, name) {
+  const raw = String(name || path || "voice");
+  const leaf = raw.split(/[\\/]/).pop() || "voice";
+  const stem = leaf.replace(/\.[^.]+$/, "") || "voice";
+  return `${stem}.m4a`;
+}
+
+/**
  * Decide which spectrum-ts builder the /send handler should use.
  *
  * @param {string} format "markdown" | "text" (already validated by /send)

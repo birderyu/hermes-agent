@@ -73,7 +73,10 @@ import {
   messageTextPreview,
   normalizeReplyContent,
 } from "./reply-content.mjs";
-import { chooseSendFormat } from "./send-format.mjs";
+import {
+  chooseSendFormat,
+  normalizeVoiceAttachmentName,
+} from "./send-format.mjs";
 import {
   classifyProbeRejection,
   shouldProbe,
@@ -1111,6 +1114,9 @@ const server = http.createServer(async (req, res) => {
       const opts = {};
       if (name) opts.name = name;
       if (mimeType) opts.mimeType = mimeType;
+      if (kind === "voice") {
+        opts.name = normalizeVoiceAttachmentName(path, name);
+      }
       const builder =
         kind === "voice"
           ? voice(path, Object.keys(opts).length ? opts : undefined)
