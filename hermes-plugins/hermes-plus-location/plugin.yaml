@@ -1,0 +1,7 @@
+name: hermes-plus-location
+version: 1.1.0
+description: Revocable on-demand device location and explicit expiring location sharing.
+provides_tools:
+  - get_user_location
+provides_hooks:
+  - pre_llm_call

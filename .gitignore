@@ -304,3 +304,18 @@ native/fts5_cjk/*.so
 
 # Disposable profile created by scripts/probe_active_session_exclusivity.py
 .probe-home/
+
+# Personal plugin sources migrated from hermes-plus; keep runtime artifacts ignored.
+!/hermes-plugins/
+!/hermes-plugins/hermes-plus-inbox/
+!/hermes-plugins/hermes-plus-inbox/*.py
+!/hermes-plugins/hermes-plus-inbox/*.yaml
+!/hermes-plugins/hermes-plus-inbox/*.md
+!/hermes-plugins/hermes-plus-location/
+!/hermes-plugins/hermes-plus-location/*.py
+!/hermes-plugins/hermes-plus-location/*.yaml
+!/hermes-plugins/hermes-plus-location/*.md
+
+/hermes-plugins/**/*.sqlite
+/hermes-plugins/**/*.p8
+/hermes-plugins/**/*.key
