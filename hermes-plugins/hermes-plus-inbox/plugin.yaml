@@ -1,7 +1,0 @@
-name: hermes-plus-inbox
-version: 1.0.0
-description: Durable GTD reports in the Hermes+ conversation, with optional private APNs alerts.
-provides_hooks:
-  - pre_llm_call
-provides_tools:
-  - get_gtd_reports

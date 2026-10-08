@@ -8,6 +8,7 @@ import sqlite3
 import time
 import uuid
 import asyncio
+import importlib.util
 import hashlib
 import secrets
 import threading
@@ -320,7 +321,10 @@ class DeviceStore(LocationStore):
 
 def register(ctx):
     from hermes_constants import get_hermes_home
-    store = DeviceStore(get_hermes_home() / 'plugin-data' / 'hermes-plus-location' / 'latest.sqlite')
+    spec = importlib.util.spec_from_file_location('ollo_location_migration', Path(__file__).with_name('migration.py'))
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    store = DeviceStore(migration.data_directory(get_hermes_home(), 'location') / 'latest.sqlite')
     adapter_ref, loop_ref = [], []
     trusted_api_sessions = set()
     lock = threading.Lock()
@@ -393,7 +397,7 @@ def register(ctx):
         # The provider is optional; importing the plugin never reads a signing key.
         if hasattr(app, 'on_cleanup'):
             import importlib.util
-            spec = importlib.util.spec_from_file_location('hermes_plus_location_apns', Path(__file__).with_name('apns.py'))
+            spec = importlib.util.spec_from_file_location('ollo_location_apns', Path(__file__).with_name('apns.py'))
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
             provider_ref[:] = [module.APNsProvider.from_env()]
@@ -403,7 +407,7 @@ def register(ctx):
 
         async def handler(request):
             path = request.path
-            device_path = path.startswith('/v1/hermes-plus/location/device/')
+            device_path = path.startswith(('/v1/ollo/location/device/', '/v1/hermes-plus/location/device/'))
             if not device_path:
                 if not adapter._expected_api_key():
                     return web.json_response({'error': 'Authentication unavailable'}, status=503)
@@ -453,17 +457,17 @@ def register(ctx):
             except LookupError:
                 return web.json_response({'error': 'Request or sharing ended'}, status=410)
 
-        prefix = '/v1/hermes-plus/location'
-        app.router.add_get(prefix, handler)
-        app.router.add_post(prefix, handler)
-        app.router.add_post(prefix + '/devices', handler)
-        app.router.add_delete(prefix + '/devices/{device}', handler)
-        app.router.add_get(prefix + '/device/state', handler)
-        app.router.add_put(prefix + '/device/observation', handler)
-        app.router.add_post(prefix + '/device/results', handler)
-        app.router.add_post(prefix + '/device/push', handler)
-        app.router.add_put(prefix + '/{lease}', handler)
-        app.router.add_delete(prefix + '/{lease}', handler)
+        for prefix in ('/v1/ollo/location', '/v1/hermes-plus/location'):
+            app.router.add_get(prefix, handler)
+            app.router.add_post(prefix, handler)
+            app.router.add_post(prefix + '/devices', handler)
+            app.router.add_delete(prefix + '/devices/{device}', handler)
+            app.router.add_get(prefix + '/device/state', handler)
+            app.router.add_put(prefix + '/device/observation', handler)
+            app.router.add_post(prefix + '/device/results', handler)
+            app.router.add_post(prefix + '/device/push', handler)
+            app.router.add_put(prefix + '/{lease}', handler)
+            app.router.add_delete(prefix + '/{lease}', handler)
 
     def context(**kwargs):
         session = kwargs.get('session_id')
@@ -490,7 +494,7 @@ def register(ctx):
     ctx.register_platform_handler('api_server', wire)
     ctx.register_hook('pre_llm_call', context)
     if hasattr(ctx, 'register_tool'):
-        ctx.register_tool(name='get_user_location', toolset='hermes_plus_location',
+        ctx.register_tool(name='get_user_location', toolset='ollo_location',
                           schema={'name': 'get_user_location', 'description': 'Read the authorized user-carried device location when needed for the current request. Returns the source, capture time and accuracy, or an explicit unavailable status. Does not ask the user to send a chat message.',
                                   'parameters': {'type': 'object', 'properties': {
                                       'max_age_seconds': {'type': 'integer', 'minimum': 0, 'maximum': 120, 'default': 120, 'description': 'Maximum cached age. Zero requires a new sample taken after this request.'},

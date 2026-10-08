@@ -1,0 +1,18 @@
+# The repository's hermes-*/* rule otherwise hides renamed plugin sources.
+!/.gitignore
+!/README.md
+!/conftest.py
+!/ollo-inbox/
+!/ollo-location/
+!/ollo-conversation/
+!/ollo-*/*.py
+!/ollo-*/*.yaml
+!/ollo-*/*.md
+
+# Runtime data and credentials never belong in a plugin source checkout.
+**/__pycache__/
+**/*.sqlite*
+**/*.db*
+**/*.p8
+**/*.key
+**/.env

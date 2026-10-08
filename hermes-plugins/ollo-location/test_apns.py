@@ -18,7 +18,7 @@ spec.loader.exec_module(apns)
 TOKEN = 'ab' * 32
 REQUEST_ID = '4b160ceb-6eea-4907-8619-9b8c77ff1661'
 CONFIG = {'key_path': '/private/test-only/never-read.p8', 'key_id': 'TESTKEY123',
-          'team_id': 'TESTTEAM12', 'topic': 'local.hermesplus.development'}
+          'team_id': 'TESTTEAM12', 'topic': 'com.birderyu.ollo'}
 
 
 class APNsTests(unittest.IsolatedAsyncioTestCase):
@@ -81,7 +81,7 @@ class APNsTests(unittest.IsolatedAsyncioTestCase):
         self.importer.assert_not_called()
 
     async def test_environment_configuration_names(self):
-        environ = {'HERMES_PLUS_APNS_' + key.upper(): value for key, value in CONFIG.items()}
+        environ = {'OLLO_APNS_' + key.upper(): value for key, value in CONFIG.items()}
         provider = apns.APNsProvider.from_env(environ)
         self.assertEqual(provider.status(), 'ready')
         self.open_key.assert_not_called()

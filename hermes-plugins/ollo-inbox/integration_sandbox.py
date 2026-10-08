@@ -13,13 +13,14 @@ import uuid
 
 
 async def main():
-    with tempfile.TemporaryDirectory(prefix='hermes-inbox-integration-') as folder:
+    with tempfile.TemporaryDirectory(prefix='ollo-inbox-integration-') as folder:
         os.environ['HERMES_HOME'] = folder
         for name in ('KEY_PATH', 'KEY_ID', 'TEAM_ID', 'TOPIC'):
+            os.environ.pop('OLLO_APNS_' + name, None)
             os.environ.pop('HERMES_PLUS_APNS_' + name, None)
         home = Path(folder)
-        (home / 'hermes-plus').mkdir()
-        (home / 'hermes-plus/inbox.json').write_text(json.dumps({'session_id': 'main', 'jobs': {'fixture-job': '今日安排'}}))
+        (home / 'ollo').mkdir()
+        (home / 'ollo/inbox.json').write_text(json.dumps({'session_id': 'main', 'jobs': {'fixture-job': '今日安排'}}))
         from aiohttp import web
         from aiohttp.test_utils import TestClient, TestServer
         from gateway.platform_registry import platform_registry, PlatformEntry
@@ -39,7 +40,7 @@ async def main():
             def register_tool(self, **kwargs):
                 self.tool = kwargs['handler']
 
-        spec = importlib.util.spec_from_file_location('hermes_inbox_sandbox', Path(__file__).with_name('__init__.py'))
+        spec = importlib.util.spec_from_file_location('ollo_inbox_sandbox', Path(__file__).with_name('__init__.py'))
         plugin = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(plugin)
         ctx = Context()
@@ -63,21 +64,21 @@ async def main():
         ctx.wire(app, api)
         headers = {'Authorization': 'Bearer isolated-fixture'}
         async with TestClient(TestServer(app)) as client:
-            response = await client.get('/v1/hermes-plus/inbox/reports?session_id=main')
+            response = await client.get('/v1/ollo/inbox/reports?session_id=main')
             assert response.status == 401
-            response = await client.get('/v1/hermes-plus/inbox/reports?session_id=foreign', headers=headers)
+            response = await client.get('/v1/ollo/inbox/reports?session_id=foreign', headers=headers)
             assert response.status == 403
-            response = await client.get('/v1/hermes-plus/inbox/reports?session_id=tip', headers=headers)
+            response = await client.get('/v1/ollo/inbox/reports?session_id=tip', headers=headers)
             data = await response.json()
             assert response.status == 200 and len(data['reports']) == 1
             assert data['reports'][0]['id'] == delivered.message_id
-            response = await client.get('/v1/hermes-plus/inbox/reports?session_id=main&after=1', headers=headers)
+            response = await client.get('/v1/ollo/inbox/reports?session_id=main&after=1', headers=headers)
             assert (await response.json())['reports'] == []
-            response = await client.get('/v1/hermes-plus/inbox/reports?session_id=main&after=-1', headers=headers)
+            response = await client.get('/v1/ollo/inbox/reports?session_id=main&after=-1', headers=headers)
             assert response.status == 400
-            response = await client.get('/v1/hermes-plus/inbox/reports/' + delivered.message_id + '?session_id=main', headers=headers)
+            response = await client.get('/v1/ollo/inbox/reports/' + delivered.message_id + '?session_id=main', headers=headers)
             assert response.status == 200 and (await response.json())['body'].startswith('隔离测试报告')
-            response = await client.put('/v1/hermes-plus/inbox/devices/' + str(uuid.uuid4()), headers=headers,
+            response = await client.put('/v1/ollo/inbox/devices/' + str(uuid.uuid4()), headers=headers,
                 json={'session_id': 'main', 'token': 'aa11', 'environment': 'sandbox'})
             assert response.status == 503
             hook = ctx.hooks['pre_llm_call']

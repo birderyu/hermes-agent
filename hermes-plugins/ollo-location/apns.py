@@ -1,11 +1,18 @@
-"""Private APNs alerts for the persisted report inbox.
+"""Optional APNs hints for the persisted device request queue.
 
-Uses the same audited provider configuration and transport as the location plugin.
-Only a generic alert and report UUID leave the server. APNs acceptance is not receipt.
-Requires HERMES_PLUS_APNS_{KEY_PATH,KEY_ID,TEAM_ID,TOPIC}; optional httpx[http2], PyJWT[crypto].
+The caller must save the request before invoking this module. An accepted push
+only means APNs accepted a hint; it does not mean the phone ran or supplied a
+location. No coordinates or device credentials belong in the push payload.
+
+Configuration (all four are required): OLLO_APNS_KEY_PATH (an absolute
+path to a private, external .p8 file), OLLO_APNS_KEY_ID,
+OLLO_APNS_TEAM_ID, and OLLO_APNS_TOPIC (the signed app bundle ID).
+Optional dependencies are httpx[http2] and PyJWT[crypto]. Nothing is imported,
+read from a key file, or sent to APNs merely by importing this module.
 """
 
 import asyncio
+import hashlib
 import importlib
 import math
 import os
@@ -20,6 +27,7 @@ ENDPOINTS = {
     'sandbox': 'https://api.sandbox.push.apple.com',
     'production': 'https://api.push.apple.com',
 }
+MIN_HINT_INTERVAL = 1200  # Apple recommends no more than 2–3 background pushes/hour.
 TOKEN_LIFETIME = 3000  # Refresh after 50 minutes, within Apple's 20–60 minute window.
 _CONFIG_NAMES = ('KEY_PATH', 'KEY_ID', 'TEAM_ID', 'TOPIC')
 _SAFE_REASONS = frozenset({
@@ -55,11 +63,12 @@ class APNsProvider:
         self._jwt = None
         self._jwt_issued_at = 0
         self._client = None
+        self._last_hints = {}
 
     @classmethod
     def from_env(cls, environ=None):
         environ = os.environ if environ is None else environ
-        values = {name.lower(): environ.get('HERMES_PLUS_APNS_' + name)
+        values = {name.lower(): environ.get('OLLO_APNS_' + name, environ.get('HERMES_PLUS_APNS_' + name))
                   for name in _CONFIG_NAMES}
         return cls(**values)
 
@@ -109,17 +118,28 @@ class APNsProvider:
                                              trust_env=False, follow_redirects=False)
         return self._client
 
-    async def send_report(self, token, environment, report_id):
+    async def send_location_hint(self, token, environment, request_id, deadline):
         state = self.status()
         if state != 'ready':
             return APNsResult(state)
-        if not valid_device_token(token) or environment not in ENDPOINTS:
+        if (not valid_device_token(token) or not isinstance(environment, str)
+                or environment not in ENDPOINTS):
             return APNsResult('invalid_request')
         try:
-            report_id = str(uuid.UUID(report_id))
+            request_id = str(uuid.UUID(request_id))
         except (ValueError, TypeError, AttributeError):
             return APNsResult('invalid_request')
+        if type(deadline) not in (int, float) or not math.isfinite(deadline):
+            return APNsResult('invalid_request')
         now = self._clock()
+        if deadline <= now:
+            return APNsResult('expired')
+        # Hash the throttle key so the provider does not retain device tokens.
+        hint_key = hashlib.sha256((environment + ':' + token.lower()).encode()).digest()
+        self._last_hints = {key: last for key, last in self._last_hints.items()
+                            if now - last < MIN_HINT_INTERVAL}
+        if hint_key in self._last_hints:
+            return APNsResult('throttled')
         try:
             client = self._http_client()
             provider_token = self._provider_token(now)
@@ -127,19 +147,22 @@ class APNsProvider:
             return APNsResult('dependencies_unavailable')
         except Exception:
             return APNsResult('credentials_unavailable')
-        remaining = 5
+        remaining = deadline - self._clock()
+        if remaining <= 0:
+            return APNsResult('expired')
+        # Reserve before the network await, including failures/cancellation, so
+        # simultaneous tools cannot generate bursts. Queue polling is unaffected.
+        self._last_hints[hint_key] = now
         headers = {
             'authorization': 'bearer ' + provider_token,
             'apns-topic': self._values[3],
-            'apns-push-type': 'alert',
-            'apns-priority': '10',
-            'apns-expiration': str(int(now + 86400)),
-            'apns-collapse-id': report_id,
+            'apns-push-type': 'background',
+            'apns-priority': '5',
+            'apns-expiration': str(int(deadline)),
+            'apns-collapse-id': 'hermes-plus-location',
         }
-        # Never put report contents, titles, session IDs or credentials on the lock screen.
-        payload = {'aps': {'alert': {'title': 'Hermes+', 'body': '有新的 GTD 报告，打开查看。'},
-                           'sound': 'default', 'thread-id': 'hermes-plus-gtd'},
-                   'hermes_plus': {'capability': 'inbox.report', 'report_id': report_id}}
+        payload = {'aps': {'content-available': 1},
+                   'hermes_plus': {'capability': 'location.read', 'request_id': request_id}}
         try:
             timeout = min(5, remaining)
             response = await asyncio.wait_for(
