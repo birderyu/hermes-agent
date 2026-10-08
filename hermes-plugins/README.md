@@ -1,6 +1,13 @@
 # Ollo 服务端插件
 
-本目录是待审源码。2026-10-08 的改名实现不代表已部署；不包含运行配置、数据库、密钥或服务操作。
+本目录维护 Ollo 服务端插件源码；实际安装位于 Hermes home 的 `plugins/ollo-*`，采用复制安装，与本目录分开。本目录不包含运行配置、数据库或密钥。
+
+部署记录（北京时间）：
+
+- 2026-10-08 15:48：首次部署 `ollo-inbox`、`ollo-location`、`ollo-conversation`；备份位于 Hermes home 的 `backups/ollo-deploy-20261008-1525/`。
+- 2026-10-08 18:49：仅替换 `ollo-conversation` 为 `1.1.0`；主回复写完后，由宿主辅助任务 `ollo_mood` 分类语气，整体等待上限 3 秒；备份位于 `backups/ollo-mood-deploy-20261008-1848/`。
+
+本次源码归并不重复上述部署，不替换已安装插件，不修改配置或定时任务，不重启网关。
 
 - [ollo-inbox](ollo-inbox/README.md)：报告持久化、`ollo:main` 投递、收件箱 API。
 - [ollo-location](ollo-location/README.md)：限时共享、按需设备位置、可选 APNs。
@@ -18,7 +25,7 @@
 6. **启动并做真实验收。** 在用户授权的维护窗口通过原服务管理流程启动/重启网关。先确认 API、Photon 与新旧投递平台健康，再按下表用新旧路径各验一次；用同一个 execution ID 分别经新旧目标投递隔离报告，确认只落一份。获得同意后在 App 做普通回答、好消息、生病/焦虑话题与压缩续接验收；iMessage 不应出现 `ollo-mood`。最后再验收 APNs 及真机后台能力；APNs `accepted` 不是设备收到了通知的证据。
 7. **必要时回滚；别名删除另审。** 回滚也需授权排空和停止所有写入者。先备份升级后产生的数据，再恢复旧插件、启用名、工具白名单、平台配置、任务字段和提示、旧环境变量；配置恢复到旧目录。数据结构未改变，优先将当前使用的 `ollo-*` 数据目录完整改名回 `hermes-plus-*`，保留升级后新记录；若旧目录还存在，先归档核对，绝不直接覆盖。只有确认可以放弃升级后写入时才恢复迁移前备份。恢复服务并重复旧路径/Photon 验证。所有 App 与队列都迁移完成后，删除旧路径和旧平台别名属于单独授权的后续变更。
 
-`cron/scheduler_delivery.py` 及现有 execution_id 兼容补丁不属于此次改动。上线前仅核验实际运行版本能向 live adapter 传递执行 ID；缺失会让报告投递明确失败。保留的 `ollo-inbox/compatibility.py` 仍是旧检查工具，本次不运行 `--apply`，也不回退该核心补丁。
+`cron/scheduler_delivery.py` 中现有的 `execution_id` 透传补丁作为独立核心提交维护，不并入插件改名提交；本次只将已有文件内容纳入版本管理，不重新应用或回退补丁，原 `.bak` 保留且不提交。缺少有效执行 ID 会让报告投递明确失败。保留的 `ollo-inbox/compatibility.py` 仍是旧检查工具，本次不运行 `--apply`。
 
 ## 部署后新旧路径验收表
 
@@ -52,11 +59,11 @@ scripts/run_tests.sh -j 2 hermes-plugins --file-retries 0
 | --- | --- |
 | 原 `hermes-plus-inbox/` 整体更名为 `ollo-inbox/` | 修改 `__init__.py`、`apns.py`、`plugin.yaml`、`README.md`、`test_inbox.py`、`integration_sandbox.py`；`store.py` 和 `compatibility.py` 仅随目录迁移、内容不变；新增 `migration.py`、`test_compatibility.py` |
 | 原 `hermes-plus-location/` 整体更名为 `ollo-location/` | 修改 `__init__.py`、`apns.py`、`plugin.yaml`、`README.md`、`APNS.md`、`test_apns.py`、`test_device_location.py`；`test_location.py` 随目录迁移；新增 `migration.py`、`test_compatibility.py` |
-| 新 `ollo-conversation/` | `__init__.py`、`plugin.yaml`、`README.md`、`test_conversation.py` |
+| 新 `ollo-conversation/` | `__init__.py`、`mood.py`、`plugin.yaml`、`README.md`、`test_conversation.py`、`test_mood.py` |
 | 本目录共用文件 | `.gitignore`（让新源码可见，仍忽略凭据和数据）、`conftest.py`（临时 home 与真实注册/路由测试工具）、`README.md`（部署清单与本记录） |
 
-7 个测试文件共 **93 通过、0 失败、3 跳过**。使用仓库 `scripts/run_tests.sh` / `run_tests_parallel.py` 的临时副本，只将 scratch 从不可写的 `/var/tmp` 指到获准临时目录并固定源码根路径，其余环境清理、按文件隔离、超时与重试机制保留；未修改核心脚本。3 项跳过源于沙箱拒绝绑定 `127.0.0.1`，不是接口验证通过。新增无 socket 合同覆盖真实路由、认证与数据库；额外覆盖三插件共同加载、多级压缩、分支/reset/委派排除、A→B→A Profile 隔离、备份失败/改名失败回退、并发迁移、配置/环境变量优先级及报告原文保留。
+本次归并前，使用上述命令验证 8 个测试文件，共 **107 通过、0 失败、3 跳过**（改名阶段的历史结果为 7 个文件、93 通过、0 失败、3 跳过）。测试在 `6671dad141` 的完整已跟踪源码临时副本中执行，只将副本测试器的 scratch 路径从 `/var/tmp/hermes-pytest` 改为获准临时目录；源码根路径仍指向该临时副本，其余环境清理、按文件隔离、超时与重试机制保留。未修改维护仓库或运行目录中的核心测试器。3 项跳过源于沙箱拒绝绑定 `127.0.0.1`，不是接口验证通过。新增无 socket 合同覆盖真实路由、认证与数据库；额外覆盖三插件共同加载、多级压缩、分支/reset/委派排除、A→B→A Profile 隔离、备份失败/改名失败回退、并发迁移、配置/环境变量优先级及报告原文保留。
 
-三个插件分别通过真实 Plugin Doctor，未报错误或警告。只读兼容检查返回 `patch ready; source unchanged`：此工作副本调度器尚缺执行 ID 补丁，部署前应核验实际运行版本；此次与基线对比确认 `cron/scheduler_delivery.py` 和兼容脚本内容均未改动。
+改名阶段曾记录：三个插件分别通过真实 Plugin Doctor，未报错误或警告；只读兼容检查返回 `patch ready; source unchanged`，当时的审查工作副本尚缺执行 ID 补丁。这些是此前阶段的验证记录，不代表本次重新执行 Plugin Doctor。运行目录已有的调度补丁单独核对、验证并入库，结果另记维护档案。
 
-未访问运行中的配置/数据，未部署、重启、提交或推送；模型语气遵循、真实 socket、APNs 和真机效果仍属部署后验收。
+此前“未部署、重启、提交或推送”的说明仅适用于最初源码审查阶段；历史部署见本文开头。本轮仅归并源码、提交既有调度补丁并同步远端，不修改已部署插件、运行配置或真实任务，不重启网关。沙箱测试不证明辅助模型的真实分类质量、socket 服务、APNs 或真机效果，本次不重复线上验收。
