@@ -1,0 +1,7 @@
+name: ollo-conversation
+version: 1.1.0
+description: Read-only Ollo conversation discovery and session-bound identity with auxiliary classification of final reply mood.
+provides_hooks:
+  - pre_llm_call
+  - transform_llm_output
+  - on_session_end

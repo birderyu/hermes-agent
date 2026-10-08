@@ -57,7 +57,7 @@ class LocationTests(unittest.TestCase):
         adapter=types.SimpleNamespace(_ensure_session_db=lambda:types.SimpleNamespace(resolve_resume_session_id=lambda s:s))
         with patch.dict('sys.modules', {'aiohttp':types.SimpleNamespace(web=None)}):
             factories['api_server'](types.SimpleNamespace(router=router),adapter)
-        store=m.LocationStore(Path(self.tmp.name)/'plugin-data/hermes-plus-location/latest.sqlite')
+        store=m.LocationStore(Path(self.tmp.name)/'plugin-data/ollo-location/latest.sqlite')
         lease=store.start(self.device,'api-test',900)['id']
         store.update(lease,1,{**self.point,'timestamp':time.time()})
         hook=hooks['pre_llm_call']

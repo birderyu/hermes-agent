@@ -127,7 +127,7 @@ class PushTests(unittest.IsolatedAsyncioTestCase):
         async def post(url, **kwargs):
             captured.update(url=url, **kwargs)
             return types.SimpleNamespace(http_version='HTTP/2', status_code=200)
-        provider = apns.APNsProvider(key_path='/test/key.p8', key_id='A' * 10, team_id='B' * 10, topic='test.hermes')
+        provider = apns.APNsProvider(key_path='/test/key.p8', key_id='A' * 10, team_id='B' * 10, topic='com.birderyu.ollo')
         provider._http_client = lambda: types.SimpleNamespace(post=post)
         provider._provider_token = lambda _: 'fixture-token'
         report = str(uuid.uuid4())
@@ -147,7 +147,7 @@ class PushTests(unittest.IsolatedAsyncioTestCase):
     async def test_transport_exception_never_exposes_token(self):
         async def post(*args, **kwargs):
             raise RuntimeError('secret-device-token')
-        provider = apns.APNsProvider(key_path='/test/key.p8', key_id='A' * 10, team_id='B' * 10, topic='test.hermes')
+        provider = apns.APNsProvider(key_path='/test/key.p8', key_id='A' * 10, team_id='B' * 10, topic='com.birderyu.ollo')
         provider._http_client = lambda: types.SimpleNamespace(post=post)
         provider._provider_token = lambda _: 'secret-jwt'
         self.assertEqual(await provider.send_report('aa11', 'sandbox', str(uuid.uuid4())), apns.APNsResult('transport_error'))
@@ -158,8 +158,8 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.home = Path(self.directory.name)
-        (self.home / 'hermes-plus').mkdir()
-        (self.home / 'hermes-plus/inbox.json').write_text(json.dumps({'session_id': 'main', 'jobs': {'job': '今日安排'}}))
+        (self.home / 'ollo').mkdir()
+        (self.home / 'ollo/inbox.json').write_text(json.dumps({'session_id': 'main', 'jobs': {'job': '今日安排'}}))
         class Base:
             def __init__(self, config, platform):
                 pass

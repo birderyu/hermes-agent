@@ -1,4 +1,4 @@
-# Hermes+ 位置插件
+# Ollo 位置插件
 
 2026-10-03 迁自 hermes-plus 仓库 server/，此前的历史见该仓库提交 [9d7844e](https://github.com/birderyu/hermes-plus/commit/9d7844e)、[f2bc57d](https://github.com/birderyu/hermes-plus/commit/f2bc57d)。
 
@@ -16,7 +16,7 @@
 
 ## HTTP 合同
 
-基础路径为 `/v1/hermes-plus/location`。所有响应为 JSON。`Point` 为 `{latitude,longitude,accuracy,timestamp}`，坐标 WGS84、精度米、时间 Unix 秒。
+基础路径为 `/v1/ollo/location`，旧 `/v1/hermes-plus/location` 及全部子路径保留为行为相同的别名。所有响应为 JSON。`Point` 为 `{latitude,longitude,accuracy,timestamp}`，坐标 WGS84、精度米、时间 Unix 秒。
 
 Owner Bearer key 仅用于能力探测、登记/重新授权和撤销：
 
@@ -51,11 +51,19 @@ Owner Bearer key 仅用于能力探测、登记/重新授权和撤销：
 
 限时共享与持久设备授权互不撤销。每台设备的新限时共享仍替换其旧限时共享，上传不能续期。旧流程仅向同一 API 会话（含压缩续接）注入不超过 120 秒的位置；上传不调用模型或写用户 transcript。停止无法撤回已经进入模型上下文或聊天记录的数据。
 
-数据库位于当前 Hermes home 的 `plugin-data/hermes-plus-location/latest.sqlite`，权限 0600。仅保存每个设备/限时共享的最新点；独立请求结果短暂保留用于重试，坐标过期后清除，不建立轨迹档案。授权状态可跨服务重启恢复。
+数据库位于当前 Hermes home 的 `plugin-data/ollo-location/latest.sqlite`，权限 0600。首次注册时先完整备份旧 `plugin-data/hermes-plus-location/` 再改名；失败继续用旧目录并记录 warning；新目录存在时不合并旧目录。仅保存每个设备/限时共享的最新点；独立请求结果短暂保留用于重试，坐标过期后清除，不建立轨迹档案。授权状态可跨服务重启恢复。
 
 ## SDK 与部署
 
-部署文件为 `plugin.yaml`、`__init__.py`、`apns.py`。安装到 `~/.hermes/plugins/hermes-plus-location/`，使用 Hermes `plugins doctor` 验证，启用插件并在获授权的维护窗口重启网关。2026-09-28 用户明确授权后，已在 Mac mini 完成插件 1.1.0 部署及一次空闲排空重启；后续服务操作仍应遵循项目授权范围。
+部署文件为 `plugin.yaml`、`__init__.py`、`apns.py`、`migration.py`，安装到当前 Hermes home 的 `plugins/ollo-location/`。本版是待审候选，未部署；旧版历史验收不代表本版验收。
+
+完整的 [逐步部署与回滚清单](../README.md#部署清单以下每一步均需用户另行同意) 每一步均需用户另行同意。位置插件需将 `plugins.enabled` 的 `hermes-plus-location` 换为 `ollo-location`，工具白名单 `hermes_plus_location` 换为 `ollo_location`，归档停用旧插件，停止所有旧写入者后才让新插件在真实 home 注册和迁移；doctor 本身使用临时 home，最后在授权窗口重启。不能同时启用两个版本。
+
+四个 `OLLO_APNS_{KEY_PATH,KEY_ID,TEAM_ID,TOPIC}` 逐项优先于旧 `HERMES_PLUS_APNS_*`；新项不存在才回退，新项空值不回退。主题示例为 `com.birderyu.ollo`，详见 [APNS.md](APNS.md)。推送载荷仍保留 `hermes_plus` 键和 `hermes-plus-location` collapse ID，旧 App 可继续领取位置请求。共享的 `hermes-plus/` → `ollo/` 配置目录及定时投递 `hermes_plus:main` → `ollo:main` 按统一清单审核，本位置插件不改任务。
+
+迁移前备份以 `hermes-plus-location.backup-<随机ID>` 命名，不完整的副本带 `.partial`。回滚前先停止写入并备份升级后数据，优先将当前 `ollo-location` 数据目录改回旧名，再恢复旧插件和启用项；不得直接覆盖旧目录或丢弃新设备登记。若迁移失败一直在用旧目录，则无需回搬。
+
+部署后用新旧 location 路径分别验证能力；同一测试 device token 经新旧 `/device/state` 应得到相同 grant；轮换、撤销、迟到上传拒绝及原租约流程两边保持一致。owner key 和 device token 仍严格隔离。
 
 工具使用 `ctx.register_tool(..., is_async=True)`，handler 返回 JSON 字符串；内部通过 `asyncio.to_thread` 执行同步 SQLite 和短等待，APNs 始终调度到 API 服务器事件循环。HTTP 路由使用 `ctx.register_platform_handler('api_server', wire)` 并分别校验 owner 与设备凭据，不改写 Hermes 原有认证函数。注意 Hermes 的 `register_middleware` 是 Agent 执行中间件，不是 HTTP 认证扩展点。
 
@@ -66,19 +74,15 @@ Owner Bearer key 仅用于能力探测、登记/重新授权和撤销：
 - [runtime session 注入及 async bridge](https://github.com/NousResearch/hermes-agent/blob/main/model_tools.py)
 - [API 服务路由与 handler 认证](https://github.com/NousResearch/hermes-agent/blob/main/gateway/platforms/api_server.py)
 
-Mac mini 实际 Hermes `20e0174ee037be7c0d68132e1d0a2cf51ce73e8a` 的 SDK、路由接入与认证已现场核对；最终 `plugins doctor --ci` 退出 0、无警告。重启后 `/v1/toolsets` 确认 `hermes_plus_location` 已启用，包含 `get_user_location`。工具 runtime 不保证提供 tool_call_id，因此核心依靠同设备/同 grant/同会话的等价未完成请求合并和请求 ID 的幂等结果；可用时额外利用 runtime call ID 去重。
-
-本次部署前旧插件与 SQLite 一致性备份位于 Mac mini `~/.hermes/backups/hermes-plus-location-20260928T225546/`。回退旧版时，在授权的空闲窗口恢复其中插件文件并排空重启，保留原有限时共享；不要无条件恢复旧数据库而覆盖后续有效写入。若要完全关闭所有位置功能，可禁用插件后在授权维护窗口重启。坐标过期独立于手机停止通知；卸载不会撤回已经写入模型上下文的数据。
-
 ## 验证
 
-以下命令从 Hermes Agent 仓库根目录执行，`python3` 应指向 Python 3.11 或更新版本；本次迁移对照使用 Python 3.12。若系统默认仍是 Python 3.9，请将命令中的 `python3` 替换为已安装的 `python3.12`。
+从 Hermes Agent 仓库根目录运行：
 
-```
-python3 -m unittest discover -s hermes-plugins/hermes-plus-location -p 'test_*.py'
+```sh
+scripts/run_tests.sh -j 2 hermes-plugins --file-retries 0
 ```
 
-安装 aiohttp 的隔离 Python 环境同时运行真实 loopback HTTP 合同测试；无 aiohttp 时这三项明确跳过。测试使用临时数据库、模拟坐标、mock owner adapter 与模拟 APNs，不访问真实位置、聊天、模型或线上服务器。覆盖租约兼容、授权/凭据轮换、撤销后的迟到上传、会话隔离及压缩续接、缓存新鲜度、max_age=0、顺序与幂等、失败/超时、多设备选择、异步工具回传以及 HTTP JSON/鉴权合同。
+安装 aiohttp 的隔离 Python 环境同时运行真实 loopback HTTP 合同测试；无 aiohttp 或沙箱禁止监听端口时，这三项明确跳过；`test_compatibility.py` 通过真实 PluginManager/API adapter/SessionDB/aiohttp 路由器在无 socket 的环境验证新旧路径合同。测试使用临时数据库、模拟坐标、mock owner adapter 与模拟 APNs，不访问真实位置、聊天、模型或线上服务器。覆盖租约兼容、授权/凭据轮换、撤销后的迟到上传、会话隔离及压缩续接、缓存新鲜度、max_age=0、顺序与幂等、失败/超时、多设备选择、异步工具回传以及 HTTP JSON/鉴权合同。
 
 2026-09-17 原限时共享曾在 Mac mini 使用临时 API 会话与模拟坐标验证。该历史验收不代表本次按需工具、真实 GPS、后台唤醒、锁屏、省电/网络切换或 Watch 已通过真机验收。
 

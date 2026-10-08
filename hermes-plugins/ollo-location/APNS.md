@@ -14,10 +14,12 @@ python3 -m pip install 'httpx[http2]' 'PyJWT[crypto]'
 
 | 环境变量 | 内容 |
 | --- | --- |
-| `HERMES_PLUS_APNS_KEY_PATH` | APNs `.p8` 文件的绝对路径 |
-| `HERMES_PLUS_APNS_KEY_ID` | Apple 的 10 位 Key ID |
-| `HERMES_PLUS_APNS_TEAM_ID` | 签名团队的 10 位 Team ID |
-| `HERMES_PLUS_APNS_TOPIC` | 与推送描述文件一致的 iOS Bundle ID |
+| `OLLO_APNS_KEY_PATH` | APNs `.p8` 文件的绝对路径 |
+| `OLLO_APNS_KEY_ID` | Apple 的 10 位 Key ID |
+| `OLLO_APNS_TEAM_ID` | 签名团队的 10 位 Team ID |
+| `OLLO_APNS_TOPIC` | 与推送描述文件一致的 iOS Bundle ID |
+
+四项新变量未设置时分别读取旧 `HERMES_PLUS_APNS_*`；新项显式为空不回退。主题示例：`OLLO_APNS_TOPIC=com.birderyu.ollo`。
 
 `APNsProvider.status()` 的 `ready` 仅确认配置形式完整；实际发送仍可能返回 `dependencies_unavailable`、`credentials_unavailable` 或 Apple 拒绝状态。未配置返回 `not_configured`。修改密钥或团队后重启服务以重建连接和 JWT 缓存。
 
@@ -25,14 +27,7 @@ python3 -m pip install 'httpx[http2]' 'PyJWT[crypto]'
 
 ## iOS 签名
 
-共享工程默认不启用推送权限。需要推送时，使用已支持 Push Notifications 的 App ID 和描述文件，在 iOS 签名构建中显式指定：
-
-```text
-CODE_SIGN_ENTITLEMENTS=App/HermesPlus.entitlements
-HERMES_PLUS_APNS_ENVIRONMENT=development
-```
-
-正式分发使用 `production`。运行时依据真实签名中的 `aps-environment` 决定是否注册远程通知；普通未启用推送的构建继续使用前台请求通道与获授权的后台位置更新。本文件不会修改 Apple 开发账号、创建密钥或配置描述文件。
+App 需使用支持 Push Notifications 的 App ID、描述文件和 entitlement。Bundle ID 示例为 `com.birderyu.ollo`，实际 `aps-environment` 决定 sandbox/production。本插件不修改 App 工程的构建参数、Apple 开发账号或描述文件；相应工作需另行授权。
 
 ## 行为与验证边界
 
