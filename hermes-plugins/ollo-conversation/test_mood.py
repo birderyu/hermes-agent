@@ -154,7 +154,7 @@ async def test_classified_text_is_stored_replayed_and_returned_by_runs(ollo, mon
     from unittest.mock import MagicMock, patch
     from aiohttp.test_utils import make_mocked_request
     from gateway.platforms import api_server
-    from gateway.platforms.api_server_runs import _RunLaunch, _execute_run
+    from gateway.platforms.api_server_runs import _RunLaunch, _RunStream, _execute_run
     from run_agent import AIAgent
     from agent import auxiliary_client
     calls = []
@@ -184,9 +184,9 @@ async def test_classified_text_is_stored_replayed_and_returned_by_runs(ollo, mon
     request = make_mocked_request('GET', '/v1/runs/' + run_id,
         headers={'Authorization':'Bearer isolated-owner-key'}, match_info={'run_id':run_id})
     ollo.api._run_owners[run_id] = ollo.api._run_idempotency_scope(request)
-    queue = asyncio.Queue()
-    ollo.api._run_streams[run_id] = queue
-    run = _RunLaunch(owner=ollo.api, run_id=run_id, queue=queue, session_id='tip',
+    stream = _RunStream()
+    ollo.api._run_streams[run_id] = stream
+    run = _RunLaunch(owner=ollo.api, run_id=run_id, queue=stream, session_id='tip',
         gateway_session_key=None, declared_selected=False, user_message='家里人发烧怎么办？',
         conversation_history=[], session_history_delivery=True, agent_kwargs={'room_dispatch':None}, request_profile=None,
         browser_control_principal='', browser_control_transport_family='')
@@ -203,8 +203,11 @@ async def test_classified_text_is_stored_replayed_and_returned_by_runs(ollo, mon
     assert sum(call['task'] == 'ollo_mood' for call in calls) == 1
     user = next(row for row in rows if row['role'] == 'user')
     assert 'Ollo' in user['api_content'] and 'ollo-mood' not in user['api_content']
-    events = []
-    while not queue.empty():
-        events.append(queue.get_nowait())
-    completed = next(event for event in events if event and event.get('event') == 'run.completed')
+    # The terminal event and closing sentinel are queued with call_soon.
+    for _ in range(10):
+        if stream.terminal:
+            break
+        await asyncio.sleep(0)
+    assert stream.terminal, 'run stream did not close after queued callbacks'
+    completed = next(event for _, event in stream.backlog if event and event.get('event') == 'run.completed')
     assert completed['output'] == expected
