@@ -1,10 +1,11 @@
 """Profile-local durable handoff for cron delivery through live gateway adapters.
 
 A restart-safe cron worker executes outside the gateway cgroup.  It cannot own
-relay/E2EE adapter objects, so it queues the final send here.  A gateway claims
-each row at most once.  If that gateway dies after claiming, the outcome is
-marked unknown and never retried: losing a delivery is safer than duplicating a
-possibly-completed send.
+relay/E2EE adapter objects, so it queues the final send here. If a gateway
+dies after claiming, the outcome is
+marked unknown unless the live router certified an idempotent single target.
+Certified transports retry the same execution with bounded backoff; others retain
+at-most-once delivery.
 """
 
 from __future__ import annotations
@@ -130,6 +131,10 @@ def _initialize_schema(conn: sqlite3.Connection) -> None:
              finished_at TEXT
            )"""
     )
+    for name, definition in (("retry_safe", "INTEGER NOT NULL DEFAULT 0"),
+                             ("attempts", "INTEGER NOT NULL DEFAULT 0"),
+                             ("retry_at", "REAL NOT NULL DEFAULT 0")):
+        add_column_if_missing(conn, "deliveries", name, f"{name} {definition}")
     add_column_if_missing(
         conn, "deliveries", "for_failure",
         "for_failure INTEGER NOT NULL DEFAULT 0",
@@ -225,21 +230,23 @@ def get_status(execution_id: str) -> Optional[dict]:
     }
 
 
-def claim_next() -> Optional[dict]:
+def claim_next(execution_id: Optional[str] = None) -> Optional[dict]:
     """Atomically claim one pending send before touching the transport."""
     pid = os.getpid()
     started = _process_start_time(pid)
     with _transaction() as conn:
         # created_at carries a DST-varying offset: order by instant, not text.
         row = conn.execute(
-            "SELECT execution_id FROM deliveries WHERE status='pending' "
-            "ORDER BY julianday(created_at), created_at, execution_id LIMIT 1"
+            "SELECT execution_id FROM deliveries WHERE status='pending' AND retry_at<=? "
+            "AND (? IS NULL OR execution_id=?) "
+            "ORDER BY julianday(created_at), created_at, execution_id LIMIT 1",
+            (time.time(), execution_id, execution_id)
         ).fetchone()
         if row is None:
             return None
         cur = conn.execute(
             """UPDATE deliveries SET status='delivering', owner_process_id=?,
-               owner_pid=?, owner_started_at=?
+               owner_pid=?, owner_started_at=?, attempts=attempts+1
                WHERE execution_id=? AND status='pending'""",
             (_PROCESS_ID, pid, started, row["execution_id"]),
         )
@@ -262,6 +269,9 @@ def _finish(execution_id: str, *, error: Optional[str], suppressed: bool = False
         else None
     )
     with _transaction() as conn:
+        from cron.delivery_retry import retry_failed
+        if error and retry_failed(conn, execution_id, safe_error):
+            return True
         cur = conn.execute(
             """UPDATE deliveries SET status=?, finished_at=?, error=?
                WHERE execution_id=? AND status='delivering'
@@ -280,11 +290,13 @@ def _finish(execution_id: str, *, error: Optional[str], suppressed: bool = False
 
 
 def recover_abandoned() -> int:
-    """Fence dead delivery owners as unknown; never replay uncertain sends.
+    """Recover certified idempotent transports; fence all other dead sends as unknown.
 
     The firer settled long ago against a ``queued`` row, so each fenced row's outcome is written
     back here (job ``delivery_failed`` + error, ledger ``failed``) instead of leaving the run at
-    ``delivery_queued`` forever."""
+    ``delivery_queued`` forever. Certified retries remain pending until a later drain settles them.
+    """
+    recovered = 0
     fenced: list[tuple[Optional[str], str]] = []
     with _transaction() as conn:
         rows = conn.execute(
@@ -298,6 +310,10 @@ def recover_abandoned() -> int:
                     if row["execution_id"] in _ACTIVE_DELIVERIES:
                         continue
             elif _owner_is_live(int(row["owner_pid"]), row["owner_started_at"]):
+                continue
+            from cron.delivery_retry import recover_claim
+            if recover_claim(conn, row["execution_id"]):
+                recovered += 1
                 continue
             error = (
                 "Gateway finished delivery but could not persist its outcome; "
@@ -322,26 +338,27 @@ def recover_abandoned() -> int:
 
     for job_id, execution_id in fenced:
         settle_quietly(job_id, execution_id)
-    return len(fenced)
+    return recovered + len(fenced)
 
 
 def drain(
-    send: Callable[[dict, str, bool], Optional[str]], *, limit: int = 20
+    send: Callable[[dict, str, bool], Optional[str]], *, limit: int = 20,
+    execution_id: Optional[str] = None,
 ) -> int:
-    """Deliver pending rows through *send*, terminalizing every claimed row."""
+    """Deliver pending rows; certified failures return to pending with bounded backoff."""
     recover_abandoned()
     processed = 0
     for _ in range(max(0, limit)):
-        row = claim_next()
+        row = claim_next(execution_id) if execution_id is not None else claim_next()
         if row is None:
             break
         with _lock:
             _ACTIVE_DELIVERIES.add(row["execution_id"])
         try:
             try:
-                error = send(
-                    row["job"], row["content"], bool(row["for_failure"])
-                )
+                from cron.delivery_retry import delivery_attempt
+                with delivery_attempt(row["execution_id"]):
+                    error = send(row["job"], row["content"], bool(row["for_failure"]))
             except BaseException as exc:
                 error = f"{type(exc).__name__}: {exc}"
             if _finish(row["execution_id"], error=error,
@@ -364,7 +381,8 @@ def _terminalize_wait_timeout(execution_id: str) -> str:
     easily exceed the worker's wait budget).  That is a deferral, not a
     failure: report success so the job is not recorded ``delivery_failed`` for
     a message the drain will still send.  Only a row caught mid-send is
-    uncertain and gets fenced ``unknown``.
+    uncertain and gets fenced ``unknown``. Certified idempotent retries are
+    the exception: they remain queued and return an unconfirmed-delivery error.
     """
     now = _hermes_now().isoformat()
     uncertain_error = (
@@ -372,6 +390,9 @@ def _terminalize_wait_timeout(execution_id: str) -> str:
         "was not retried"
     )
     with _transaction() as conn:
+        from cron.delivery_retry import pending_wait_error
+        if pending_error := pending_wait_error(conn, execution_id):
+            return pending_error
         row = conn.execute(
             "SELECT status FROM deliveries WHERE execution_id=?",
             (str(execution_id),),
@@ -408,7 +429,7 @@ def enqueue_and_wait(
     for_failure: bool = False,
     timeout: Optional[float] = None,
 ) -> Optional[str]:
-    """Queue delivery and wait for a gateway's terminal at-most-once outcome."""
+    """Queue delivery and wait for the gateway outcome; pending retries are not success."""
     queued = enqueue(execution_id, job, content, for_failure=for_failure)
     if queued["status"] in _TERMINAL:
         return None if queued["status"] in {"delivered", "suppressed"} else str(
