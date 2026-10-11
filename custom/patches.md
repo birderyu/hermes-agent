@@ -17,7 +17,7 @@
 | `08f696a1ba` docs(plugins): 更新 Ollo 部署与验证记录 | 插件 README | — | — | 随插件 |
 | `7d7752503f` chore(plugins): drop stale hermes-plus gitignore exceptions | 删掉根 `.gitignore` 里只针对旧插件名的例外 | 改名后由 `hermes-plugins/.gitignore` 负责 | — | — |
 | `cce920898c` test(plugins): follow v0.21.6 run stream in ollo-conversation mood test | `ollo-conversation` 测试改用 v0.21.6 的 `_RunStream` | 上游把任务事件队列换成了带序号和回放的流 | — | 随插件 |
-| （本表所在提交）docs(fork): 维护文档 | `fork/` 目录 | 本 fork 的修订方式与记录 | — | — |
+| （本表所在提交）docs(fork)、docs(custom): 维护文档 | `custom/` 目录（2026-10-11 由 `fork/` 改名） | 本 fork 的修订方式与记录 | — | — |
 
 ### Ollo 插件的去留
 
@@ -33,7 +33,7 @@ Ollo 网关（Ollo 仓库的 `server/`）在 2026-10-10 上线，App 改为只�
 
 ### 语言覆盖
 
-`fork/runtime/locales/zh.yaml`、`en.yaml` 部署到运行环境的 `$HERMES_HOME/locales/`（v0.21.6 起支持的用户覆盖层），只覆盖 `gateway.session.auto_reset_notice`：上游的文案说「对话历史已清空」，实际上一会话还在历史里，可以 `/resume`。这取代了原来的代码补丁 `fix(i18n): localize gateway session reset notices`。上游改正文案后删除覆盖文件。
+`custom/runtime/locales/zh.yaml`、`en.yaml` 部署到运行环境的 `$HERMES_HOME/locales/`（v0.21.6 起支持的用户覆盖层），只覆盖 `gateway.session.auto_reset_notice`：上游的文案说「对话历史已清空」，实际上一会话还在历史里，可以 `/resume`。这取代了原来的代码补丁 `fix(i18n): localize gateway session reset notices`。上游改正文案后删除覆盖文件。
 
 ### 更新器设置（2026-10-11 起）
 

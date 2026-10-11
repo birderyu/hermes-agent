@@ -13,7 +13,7 @@
 | 常驻服务 | `~/Library/LaunchAgents/ai.hermes.gateway.plist`，经 `/usr/bin/osascript` 启动网关（`hermes gateway restart` 发现定义过时会重写） |
 | 运行数据与配置 | `~/.hermes`（`config.yaml`、`.env`、`state.db`、`cron/`、`plugins/`、`skills/` 等），不在本仓库 |
 | Ollo 插件 | `~/.hermes/plugins/ollo-*`，从 `hermes-plugins/` 复制安装 |
-| 语言覆盖 | `~/.hermes/locales/zh.yaml`、`en.yaml`，从 [fork/runtime/locales](runtime/locales) 复制 |
+| 语言覆盖 | `~/.hermes/locales/zh.yaml`、`en.yaml`，从 [custom/runtime/locales](runtime/locales) 复制 |
 
 v0.21.5 及以前，依赖装在 `~/.hermes/hermes-agent/venv`，LaunchAgent 直接运行其中的 Python；第一次升级到 pm 管理的版本时，更新流程建立新环境、重新生成入口和服务，旧 `venv` 不再使用（2026-10-11 的升级前副本在 `~/.hermes/backups/pre-v0.21.6-20261011/venv`）。
 
@@ -73,7 +73,7 @@ hermes config get updates.auto_switch_parked_branch   # 必须是 false
 - `auto_switch_parked_branch` 默认是 true：更新目标是 `main` 而检出停在别的分支时，更新器会自动切到 `main`。关掉后，误跑无参数的 `hermes update` 也不会离开 `custom`。
 
 ```bash
-cp fork/runtime/locales/*.yaml ~/.hermes/locales/      # 从开发副本复制；目录不存在先建
+cp custom/runtime/locales/*.yaml ~/.hermes/locales/      # 从开发副本复制；目录不存在先建
 GIT_CONFIG_COUNT=1 \
 GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf GIT_CONFIG_VALUE_0=git@github.com: \
 hermes update --branch custom --yes
@@ -99,7 +99,7 @@ hermes gateway restart
 
 然后核对 `gateway_state.json` 的 `code_sha`，并检查 fork 上的 `main` 有没有被推走（`git ls-remote origin refs/heads/main`），被推走就从开发副本用 `--force-with-lease` 推回基线。
 
-只改 `fork/` 文档的提交不需要部署，运行目录的 HEAD 可以落后 `origin/custom` 若干个纯文档提交。
+只改 `custom/` 文档的提交不需要部署，运行目录的 HEAD 可以落后 `origin/custom` 若干个纯文档提交。
 
 插件代码有变化时，先比较再复制：
 
