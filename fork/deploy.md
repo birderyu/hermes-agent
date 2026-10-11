@@ -125,6 +125,7 @@ diff -rq -x __pycache__ ~/.hermes/hermes-agent/hermes-plugins/ollo-inbox ~/.herm
 | Ollo | Ollo 仓库 `server/deploy/install.py verify`（本机、公网）；必要时加 `--send "…"` 发一条验收消息 | 能力、会话、历史正常；发送时事件到 `run.completed`，回复出现在历史 |
 | 日志 | 重启后的 `~/.hermes/logs/gateway.log`、`gateway.error.log`、`errors.log`（按行首时间戳筛选） | 没有新的 ERROR、Traceback |
 | iMessage | 用户在 iMessage 里让 Hermes 发起一个二选一确认并点选 | 选择回到 Hermes，只回复一次 |
+| 日历与提醒事项 | 下一次 GTD 定时任务的输出，或日志里的 `full access is not granted` | 能读到。读不到时，在 Mac mini 上给 `osascript` 授权（v0.21.6 起网关由它启动）：解锁屏幕后在 iMessage 发「今日安排」，弹窗里允许提醒事项、日历选「完全访问」；没有弹窗就到「系统设置 → 隐私与安全性 → 提醒事项 / 日历」打开 `osascript`，列表里没有它时先在终端 `tccutil reset Reminders com.apple.osascript`、`tccutil reset Calendar com.apple.osascript` 再触发一次。授权给 `osascript` 意味着用它运行的其他脚本也能读日历和提醒事项 |
 
 服务状态以 `launchctl`、状态文件、日志和真实消息交叉判断，不只看 `hermes gateway status`。
 
