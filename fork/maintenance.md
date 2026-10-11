@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 开发副本 `~/Projects/hermes-agent` | 所有修改、合并上游、测试、提交、推送 | 远端 `origin`（本 fork，HTTPS）与 `upstream`（官方）；依赖环境与运行环境隔离，见下文 |
 | fork `github.com/birderyu/hermes-agent` | `main` 与 `custom` 的唯一来源 | 公开仓库：不提交凭据、电话号码、Photon 项目标识、允许名单、会话内容和实际位置 |
-| 运行目录 `~/.hermes/hermes-agent` | Mac mini 上实际运行的代码 | 只部署、不开发；只能从 `origin/custom` 更新，见 [部署](deploy.md) |
+| 运行目录 `~/.hermes/hermes-agent` | Mac mini 上实际运行的代码 | 只部署、不开发；只能从 `origin/custom` 更新；只有 `origin` 远端，见 [部署](deploy.md) |
 
 2026-10-11 之前 `~/Projects/hermes-agent` 是指向运行目录的软链，改代码就等于改线上；之后改为独立 clone。
 
@@ -114,6 +114,8 @@ git push --atomic --force-with-lease=refs/heads/custom:$OLD_ORIGIN_CUSTOM origin
 5. 测试不能写 `~/.hermes`。全量测试生成的未跟踪文件（例如 `MagicMock` 数据库目录）移出仓库，不提交。
 
 常见的共同失败：可选 provider 没装、Linux/systemd/WSL 假设、macOS 权限与桌面驱动、更新器测试对 launchd 的假设、搜索子进程 `ProcessLookupError` 竞态。Mac mini 上开着 Hermes 桌面 App 会让部分测试失败，跑测试前退出。
+
+**全量测试会碰本机正在运行的网关**：服务管理类测试会作用到真实的 LaunchAgent `ai.hermes.gateway`。2026-09-11 和 2026-10-11 都出现过：网关收到 SIGTERM 后由 launchd 拉起，关闭时还会向 iMessage 发一条关机通知。在 Mac mini 上跑全量前要预期这条通知；跑完用 `gateway_state.json` 的 `code_sha` 和进程启动时间确认运行的仍是运行目录的代码。
 
 ## 移除补丁
 

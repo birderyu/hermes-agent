@@ -9,13 +9,13 @@
 | 代码 | `~/.hermes/hermes-agent`：`custom` 的 git checkout，只部署不开发 |
 | Python、node 等工具 | `~/.hermes/tools`（pm 管理） |
 | 依赖环境 | `~/.hermes/installs/<哈希>/`（pm 管理的「代」，每次依赖变化生成新的一代） |
-| 命令入口 | `~/.local/bin/hermes`（由更新流程重新生成） |
-| 常驻服务 | `~/Library/LaunchAgents/ai.hermes.gateway.plist`（`hermes gateway restart` 发现解释器变了会重写） |
+| 命令入口 | `~/.local/bin/hermes` → `~/.hermes/hermes-agent/.hermes/bin/hermes`（都由更新流程生成） |
+| 常驻服务 | `~/Library/LaunchAgents/ai.hermes.gateway.plist`，经 `/usr/bin/osascript` 启动网关（`hermes gateway restart` 发现定义过时会重写） |
 | 运行数据与配置 | `~/.hermes`（`config.yaml`、`.env`、`state.db`、`cron/`、`plugins/`、`skills/` 等），不在本仓库 |
 | Ollo 插件 | `~/.hermes/plugins/ollo-*`，从 `hermes-plugins/` 复制安装 |
 | 语言覆盖 | `~/.hermes/locales/zh.yaml`、`en.yaml`，从 [fork/runtime/locales](runtime/locales) 复制 |
 
-v0.21.5 及以前，依赖装在 `~/.hermes/hermes-agent/venv`；第一次升级到 pm 管理的版本时，更新流程会建立新环境、重新生成入口和服务，旧 `venv` 不再使用。
+v0.21.5 及以前，依赖装在 `~/.hermes/hermes-agent/venv`，LaunchAgent 直接运行其中的 Python；第一次升级到 pm 管理的版本时，更新流程建立新环境、重新生成入口和服务，旧 `venv` 不再使用（2026-10-11 的升级前副本在 `~/.hermes/backups/pre-v0.21.6-20261011/venv`）。
 
 ## 运行目录为什么还保留 git
 
@@ -43,6 +43,7 @@ hermes cron list
 - 运行目录除已知的未跟踪文件外必须干净；有改动先弄清楚来源，不要让更新流程把它们 stash 掉。
 - 确认没有正在进行的任务；Mac mini 上的 Hermes 桌面 App 要先退出（它的后端也跑在运行环境里，并会干扰日历/提醒事项的权限归属）。
 - 记下 Ollo 网关的验证结果作对照（Ollo 仓库 `server/deploy/install.py verify`）。
+- `~/.hermes/plugins/` 里还有不归本 fork 管的用户插件（例如 `bot-handoff`、`orca-status`）：确认它们用到的钩子名（`hermes_cli/plugins.py` 的 `VALID_HOOKS`）、导入的模块和调用的 `hermes` 命令行参数在新版本里还在，升级后看日志有没有加载失败。
 
 ### 2 备份
 
@@ -61,6 +62,16 @@ done
 
 ### 3 更新
 
+运行目录的两项前提（2026-10-11 已设好，每次部署前确认还在）：
+
+```bash
+git -C ~/.hermes/hermes-agent remote            # 只能有 origin，不能有 upstream
+hermes config get updates.auto_switch_parked_branch   # 必须是 false
+```
+
+- 有 `upstream` 远端时，更新器在目标是 `main` 的情况下会把 `main` 同步到官方开发主线，并 `push origin main` 推到 fork。开发副本才需要 `upstream`。
+- `auto_switch_parked_branch` 默认是 true：更新目标是 `main` 而检出停在别的分支时，更新器会自动切到 `main`。关掉后，误跑无参数的 `hermes update` 也不会离开 `custom`。
+
 ```bash
 cp fork/runtime/locales/*.yaml ~/.hermes/locales/      # 从开发副本复制；目录不存在先建
 GIT_CONFIG_COUNT=1 \
@@ -70,8 +81,25 @@ hermes update --branch custom --yes
 
 - 运行目录的 `origin` 是 SSH 地址，本机 22 端口常被关闭；上面用环境变量临时改走 HTTPS，不改保存的远端配置。
 - `custom` 变基后与运行目录本地分支分叉，更新流程会先把旧 HEAD 存到 `refs/hermes-update-backups/…`，再对齐到 `origin/custom`。
-- 更新流程负责：安装依赖（pm）、重新生成 `~/.local/bin/hermes`、重启网关（必要时重写 LaunchAgent）。不要用无参数的 `hermes update`，它默认切到 `main`。
+- 更新流程负责：安装依赖（pm）、重新生成 `~/.local/bin/hermes`、重启网关（必要时重写 LaunchAgent）、重建 TUI、网页界面和桌面 App。一定带 `--branch custom`。
 - Photon sidecar 的依赖在 sidecar 启动时按新的 lockfile 重装，`postinstall` 会重新打 Spectrum 补丁。
+- 更新结束后看最后一行和 `hermes pm status` 的 `fleet`：网关的 `code_sha` 必须等于 `origin/custom`。更新器报「not claiming success」或检出不在 `custom` 时，按下面的「更新没对齐时」处理，不要直接重试。
+
+#### 更新没对齐时
+
+从 0.21.5 及更早版本（没有 pm 的版本）升级时，旧更新器拉完代码后把后半程交给新代码，`--branch` 在交接中丢失，新代码按 `main` 继续（2026-10-11 就是这样，见 [记录](records/2026-10-11-v0.21.6.md)）。处理：
+
+```bash
+git -C ~/.hermes/hermes-agent checkout custom          # 回到 custom（检出必须干净）
+git -C ~/.hermes/hermes-agent branch -f main <官方基线>  # 本地 main 退回接受的基线
+hermes update --branch custom --yes                     # 新版更新器补完未完成的步骤
+hermes pm install                                       # 已是最新提交时更新器不再同步依赖，这里按当前 lockfile 补一次
+hermes gateway restart
+```
+
+然后核对 `gateway_state.json` 的 `code_sha`，并检查 fork 上的 `main` 有没有被推走（`git ls-remote origin refs/heads/main`），被推走就从开发副本用 `--force-with-lease` 推回基线。
+
+只改 `fork/` 文档的提交不需要部署，运行目录的 HEAD 可以落后 `origin/custom` 若干个纯文档提交。
 
 插件代码有变化时，先比较再复制：
 
@@ -85,24 +113,22 @@ diff -rq -x __pycache__ ~/.hermes/hermes-agent/hermes-plugins/ollo-inbox ~/.herm
 
 | 项目 | 方法 | 期望 |
 | --- | --- | --- |
-| 代码版本 | `hermes --version`；`git -C ~/.hermes/hermes-agent rev-parse HEAD origin/custom` | 版本号为新版本；HEAD 等于 `origin/custom` |
-| 运行进程 | `hermes update --plan`、`gateway_state.json` 的 `code_sha` | 网关跑的是新提交，不是旧进程 |
-| 服务 | `launchctl print gui/$(id -u)/ai.hermes.gateway` | running，程序来自 pm 环境 |
-| 平台 | `gateway_state.json`、`hermes photon status`、`curl 127.0.0.1:8789/healthz` | Photon、API server connected；sidecar ok。`/probe` 返回 inconclusive 不能算健康证明 |
+| 代码版本 | `hermes --version`；`git -C ~/.hermes/hermes-agent status --short --branch` | 版本号为新版本，不带 `.dirty`；在 `custom`，与 `origin/custom` 之间只差纯文档提交 |
+| 运行进程 | `hermes pm status` 的 `fleet`、`gateway_state.json` 的 `code_sha` | 网关跑的是要部署的提交，不是旧进程或别的分支 |
+| 依赖环境 | `hermes pm doctor`；`hermes pm status` | 工具齐全；最近一次同步成功 |
+| 服务 | `launchctl print gui/$(id -u)/ai.hermes.gateway`；`ps` 看网关进程 | running；v0.21.6 起 LaunchAgent 经 `/usr/bin/osascript` 启动 `~/.hermes/hermes-agent/.hermes/bin/hermes`，网关进程的解释器在 `~/.hermes/tools/python-*` |
+| 平台 | `gateway_state.json`（看各平台的写入者 PID 是否为当前进程）、网关日志的 `photon connected` | Photon、API server、`ollo` connected。sidecar 的 `/healthz`、`/probe` 需要认证，`/probe` 返回 inconclusive 也不能算健康证明 |
+| Photon 补丁 | `plugins/platforms/photon/sidecar/node_modules/@spectrum-ts/imessage/dist/index.js` 里有 `Hermes patch: Accept empty iMessage poll titles` | 空标题补丁已打上 |
 | 插件 | `hermes plugins list`、网关日志 | `ollo-*` 已加载，无报错 |
 | 定时任务 | `hermes cron list` | 全部 enabled，下次运行时间正常 |
 | 语言覆盖 | 用运行环境的 Python 调 `agent.i18n.t("gateway.session.auto_reset_notice")` | 返回覆盖后的文案 |
-| Ollo | Ollo 仓库 `server/deploy/install.py verify`（本机、公网） | 能力、会话、历史正常 |
-| 日志 | 重启后的 `~/.hermes/logs/gateway.log`、`gateway.error.log` | 没有新的 ERROR、Traceback |
+| Ollo | Ollo 仓库 `server/deploy/install.py verify`（本机、公网）；必要时加 `--send "…"` 发一条验收消息 | 能力、会话、历史正常；发送时事件到 `run.completed`，回复出现在历史 |
+| 日志 | 重启后的 `~/.hermes/logs/gateway.log`、`gateway.error.log`、`errors.log`（按行首时间戳筛选） | 没有新的 ERROR、Traceback |
 | iMessage | 用户在 iMessage 里让 Hermes 发起一个二选一确认并点选 | 选择回到 Hermes，只回复一次 |
 
 服务状态以 `launchctl`、状态文件、日志和真实消息交叉判断，不只看 `hermes gateway status`。
 
 `hermes photon status` 会打印手机号和 Photon 项目标识，只看「已存储/已安装」这类状态，不要把输出贴进记录。
-
-## 不在本仓库的用户插件
-
-`~/.hermes/plugins/` 里还有不归本 fork 管的用户插件（例如 `bot-handoff`、`orca-status`）。每次升级前确认它们用到的钩子名、导入的模块和调用的 `hermes` 命令行参数在新版本里还在（钩子清单在 `hermes_cli/plugins.py` 的 `VALID_HOOKS`），升级后看日志里有没有加载失败。
 
 ### 5 记录
 
