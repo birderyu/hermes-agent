@@ -29,9 +29,22 @@ Ollo 网关（Ollo 仓库的 `server/`）在 2026-10-10 上线，App 改为只�
 | `ollo-inbox` | `ollo:main` 投递平台、收件箱接口、`get_gtd_reports` 工具 | 网关第 2 步接管收件箱后下线；App 已不直接访问它的接口 |
 | `ollo-location` | `get_user_location` 工具、位置接口与唤醒推送 | 网关第 2 步接管位置后，工具并入 `ollo-bridge`；App 已不直接访问它的接口 |
 
-## 运行时语言覆盖（不是代码补丁）
+## 运行环境里的非代码调整
+
+### 语言覆盖
 
 `fork/runtime/locales/zh.yaml`、`en.yaml` 部署到运行环境的 `$HERMES_HOME/locales/`（v0.21.6 起支持的用户覆盖层），只覆盖 `gateway.session.auto_reset_notice`：上游的文案说「对话历史已清空」，实际上一会话还在历史里，可以 `/resume`。这取代了原来的代码补丁 `fix(i18n): localize gateway session reset notices`。上游改正文案后删除覆盖文件。
+
+### 更新器设置（2026-10-11 起）
+
+- 运行目录只保留 `origin` 远端，没有 `upstream`：避免更新器把 `main` 同步到官方开发主线并推到 fork。
+- `~/.hermes/config.yaml` 里 `updates.auto_switch_parked_branch: false`：避免更新器把检出从 `custom` 切走。
+
+原因见 [v0.21.6 升级记录](records/2026-10-11-v0.21.6.md#部署)。
+
+### 待定
+
+- `session_reset`：v0.21.6 起按闲置和每日定时自动重置会话要装插件 `hermes-session-reset-policy`，否则只在 `/new`、`/reset` 时重置。是否安装待用户决定。
 
 ## 已移除
 
