@@ -1311,6 +1311,10 @@ def _live_send_text(
             logger.warning("Job '%s': %s, falling back to standalone", job["id"], msg)
             target_errors.append(msg)
             return False, False, None
+        from cron.delivery_retry import certified_attempt
+        if certified_attempt(t):
+            target_errors.append("Idempotent live send is in flight; delivery is not confirmed.")
+            return False, True, None
         logger.warning(
             "Job '%s': live adapter send to %s:%s timed out "
             "after 60s; already dispatched (in flight), "
@@ -1600,6 +1604,10 @@ def _deliver_standalone(
     t: _TargetDelivery, content: str, media_files: list, target_errors: list, delivery_errors: list,
 ) -> None:
     """Standalone fallback for a target the live lane did not deliver."""
+    from cron.delivery_retry import certified_attempt
+    if certified_attempt(t):
+        delivery_errors.extend(target_errors or ["Idempotent live delivery is not confirmed."])
+        return
     job = t.job
     if t.is_relay:
         # Relay owns the destination and credential; a native retry could duplicate — fail closed.
@@ -1895,6 +1903,10 @@ def _deliver_result(
             mirror_enabled=mirror_enabled, mirror_text=mirror_text, delivery_errors=delivery_errors)
         if t is None:
             continue
+        from cron.delivery_retry import queued_live_delivery
+        queued, error = queued_live_delivery(t, len(targets), media_files, content, adapters, loop, for_failure)
+        if queued:
+            return error
         target_errors: list = []
         delivered = t.live_adapter_ready and _deliver_via_live_adapter(
             t, cleaned_delivery_content, media_files,
