@@ -2,7 +2,7 @@
 
 本目录是 `custom` 分支的说明书和台账。`custom` 分支就是 Mac mini 上实际运行的 Hermes Agent：官方正式发行版，加上少量个人补丁和 Ollo 的服务端插件。这里记录这个 fork 怎么修改、怎么升级、怎么部署，以及每次修订的经过。维护 fork 只看这里。
 
-目录和分支同名，沿用下游在源码里用自己名字建目录的惯例（例如 Debian 的 `debian/`）。只在 `custom` 分支上存在的说明、补丁清单、修订记录和部署用文件都放在这里；插件源码另放在 `hermes-plugins/`。2026-10-11 之前这个目录叫 `fork/`。
+目录和分支同名，沿用下游在源码里用自己名字建目录的惯例（例如 Debian 的 `debian/`）。只在 `custom` 分支上存在的说明、补丁清单和修订记录都放在这里；插件源码另放在 `hermes-plugins/`。2026-10-11 之前这个目录叫 `fork/`。
 
 官方仓库：[NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)。仓库根目录的 `README.md`、`AGENTS.md` 等是官方文件，不在这里改。
 
@@ -11,7 +11,7 @@
 | 项目 | 值 |
 | --- | --- |
 | 官方基线 `main` | `v0.21.6`（`818c13be1d`，2026-10-08 发布） |
-| `custom` | `main` + 10 个提交（4 个 Hermes 补丁、Ollo 插件、维护文档），见 [补丁清单](patches.md) |
+| `custom` | `main` + 1 个 Hermes 补丁（cron）、Ollo 插件、维护文档；3 个 iMessage 补丁已于 2026-10-11 撤回，见 [补丁清单](patches.md) |
 | 运行版本 | 以 `hermes --version` 为准，部署经过见 [记录](records/README.md) |
 | 开发副本 | `~/Projects/hermes-agent`（独立 clone） |
 | 运行目录 | `~/.hermes/hermes-agent`（只部署） |
@@ -24,7 +24,6 @@
 | [deploy.md](deploy.md) | 部署到 Mac mini：运行环境布局、步骤、验证、回滚 |
 | [patches.md](patches.md) | 现行补丁与已移除补丁：为什么、上游状态、何时移除 |
 | [records/](records/README.md) | 修订记录 |
-| [runtime/](runtime) | 部署到运行环境的非代码文件（语言覆盖） |
 | [../hermes-plugins/](../hermes-plugins/README.md) | Ollo 服务端插件源码 |
 
 ## 规则
