@@ -44,7 +44,7 @@ source ./activate                                         # 进入开发环境�
 - 只用 `--runtime-only`。不带它的 `setup-hermes.sh` 会改写 `~/.local/bin/hermes`（运行中的 Hermes 入口）、向 `$HERMES_HOME/skills` 同步技能、改 shell 配置。
 - 不要用裸 `pip`/`uv` 改 Hermes 的环境（仓库 `pm/AGENTS.md` 的规定）。
 - 测试一律 `scripts/run_tests.sh`，不用裸 `pytest`。不激活时可以用 `HERMES_PYTHON=<测试环境的 python> scripts/run_tests.sh …`；测试环境的 python 用 `source ./activate` 后的 `$__HERMES_TEST_PYTHON` 查到。
-- Photon sidecar：`cd plugins/platforms/photon/sidecar && npm ci && npm test`（激活后用的是 pm 提供的 node）。`npm ci` 会跑 `postinstall` 里的 Spectrum 补丁。
+- `source ./activate` 要在 bash 里执行。zsh 下 `scripts/_activation.sh` 查找 Windows 版 Python 的通配符（`python-*/python.exe`）匹配不到会报 `no matches found`，激活失败。用 `bash -c 'export HERMES_RUNTIME_DIR=… HERMES_HOME=…; source ./activate; scripts/run_tests.sh …'`，或者先进入 bash。
 - `source ./activate` 每次都会先按锁文件同步一遍环境（已是最新时很快），所以依赖变化后直接重新激活即可。
 - 用 Codex CLI 改代码时，它的 `workspace-write` 沙箱默认禁止写 `.git`，需要单独放开开发副本的 `.git`：`-c 'sandbox_workspace_write.writable_roots=["/Users/birderyu/Projects/hermes-agent/.git"]'`，`~/.hermes` 保持不可写。沙箱里跑不了 Hermes 的 Python 测试（测试进程启动即 `PermissionError`），测试在沙箱外跑。
 
@@ -52,7 +52,7 @@ source ./activate                                         # 进入开发环境�
 
 1. 在开发副本的 `custom` 上改，一个问题一个提交，标题沿用 `fix(photon): …`、`fix(cron): …` 这类格式。
 2. 先确认上游有没有修过（看 `upstream/main` 和官方 issue）；能提给上游的通用修复，同时提 PR。
-3. 按问题加行为测试，用 `scripts/run_tests.sh` 跑相关目录；sidecar 改动跑 `npm test`。
+3. 按问题加行为测试，用 `scripts/run_tests.sh` 跑相关目录。
 4. 在 [补丁清单](patches.md) 登记：提交、为什么、上游状态、什么时候可以移除。
 5. `git push origin custom`（普通快进推送）。部署另走 [部署](deploy.md)。
 6. 在 `records/` 写一篇记录，并更新 [记录索引](records/README.md)。
@@ -105,7 +105,7 @@ git push --atomic --force-with-lease=refs/heads/custom:$OLD_ORIGIN_CUSTOM origin
 
 ## 测试与基线对照
 
-1. **定向测试**：Photon 目录、`tests/gateway/` 里与补丁相关的文件、`hermes-plugins/`、`tests/cron/` 里与投递相关的文件；sidecar `npm test`。
+1. **定向测试**：`hermes-plugins/`、`tests/cron/` 里与投递相关的文件、`tests/gateway/` 里与补丁相关的文件。
 2. **全量测试**：`scripts/run_tests.sh -j 8`，记录文件数、通过、失败、跳过、耗时和首次失败后重试通过的文件。
 3. **基线对照**：在一个独立的纯官方标签副本里（`git clone --shared ~/Projects/hermes-agent <临时目录>` 后 checkout 标签，用同一个 `HERMES_RUNTIME_DIR`/`HERMES_HOME` 装环境），用同样的入口复跑全量里所有失败的文件，按测试标识比较：
    - 共同失败：官方本身的失败或本机环境问题，不算定制回归；

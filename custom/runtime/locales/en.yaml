@@ -1,6 +1,0 @@
-# Hermes user locale overlay: deploy to $HERMES_HOME/locales/en.yaml (supported since v0.21.6).
-# Overrides only the keys listed here. See custom/patches.md, section 运行环境里的非代码调整 → 语言覆盖.
-gateway:
-  session:
-    # Sent only after a stopped or interrupted session is auto-reset; the old session is kept in history.
-    auto_reset_notice: "◐ The previous session was stopped or interrupted, so a new session was started.\nIt is still saved in history; use /resume to browse or restore it.\n"
