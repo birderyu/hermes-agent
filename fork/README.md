@@ -1,0 +1,35 @@
+# birderyu/hermes-agent 个人 fork
+
+本 fork 的 `custom` 分支是 Mac mini 上实际运行的 Hermes Agent：官方正式发行版，加上少量个人补丁和 Ollo 的服务端插件。本目录记录这个 fork 怎么修改、怎么升级、怎么部署，以及每次修订的经过。维护 fork 只看这里。
+
+官方仓库：[NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)。仓库根目录的 `README.md`、`AGENTS.md` 等是官方文件，不在这里改。
+
+## 现状
+
+| 项目 | 值 |
+| --- | --- |
+| 官方基线 `main` | `v0.21.6`（`818c13be1d`，2026-10-08 发布） |
+| `custom` | `main` + 10 个提交（4 个 Hermes 补丁、Ollo 插件、维护文档），见 [补丁清单](patches.md) |
+| 运行版本 | 以 `hermes --version` 为准，部署经过见 [记录](records/README.md) |
+| 开发副本 | `~/Projects/hermes-agent`（独立 clone） |
+| 运行目录 | `~/.hermes/hermes-agent`（只部署） |
+
+## 目录
+
+| 位置 | 内容 |
+| --- | --- |
+| [maintenance.md](maintenance.md) | 维护方式：分支、开发环境、新增补丁、发行版升级、测试与基线对照、回滚 |
+| [deploy.md](deploy.md) | 部署到 Mac mini：运行环境布局、步骤、验证、回滚 |
+| [patches.md](patches.md) | 现行补丁与已移除补丁：为什么、上游状态、何时移除 |
+| [records/](records/README.md) | 修订记录 |
+| [runtime/](runtime) | 部署到运行环境的非代码文件（语言覆盖） |
+| [../hermes-plugins/](../hermes-plugins/README.md) | Ollo 服务端插件源码 |
+
+## 规则
+
+- `main` 只放官方发行基线；个人改动只在 `custom`，一个问题一个提交，并在 [补丁清单](patches.md) 登记退出条件。
+- 只跟官方正式发行版升级，不追 `upstream/main`，不降级。
+- 在开发副本改代码、测试、推送；运行目录只用 `hermes update --branch custom` 部署，不在里面改文件。
+- 推送变基后的 `custom` 只用带精确旧 SHA 的 `--force-with-lease`。
+- 这是公开仓库：不提交凭据、`.env`、OAuth、电话号码、Photon 项目标识、允许名单、会话内容、实际位置和运行数据库。
+- 部署、重启网关、改 Mac mini 上的配置，先说明影响和回滚方法。
