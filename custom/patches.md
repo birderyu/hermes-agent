@@ -63,7 +63,7 @@ Ollo 网关（Ollo 仓库的 `server/`）在 2026-10-10 上线，App 改为只�
 
 ### 会话自动重置：不启用
 
-v0.21.6 起，按闲置和每日定时自动重置会话要装插件 `hermes-session-reset-policy`，否则只在 `/new`、`/reset` 时重置。这个机制只作用于 iMessage 这类消息渠道，Ollo 走的 API 会话本来就不受它管。2026-10-11 起不再使用 iMessage，决定不装。`config.yaml` 里的 `session_reset` 块还在，网关启动和 `hermes doctor` 会提示它不再生效；删掉这个块就不再提示。
+v0.21.6 起，按闲置和每日定时自动重置会话要装插件 `hermes-session-reset-policy`，否则只在 `/new`、`/reset` 时重置。这个机制只作用于 iMessage 这类消息渠道，Ollo 走的 API 会话本来就不受它管。2026-10-11 起不再使用 iMessage，决定不装。同日从 `~/.hermes/config.yaml` 删掉了 `session_reset` 块（`mode: both`、`idle_minutes: 1440`、`at_hour: 4`），网关启动不再提示；删除前的配置备份在 `~/.hermes/backups/cleanup-20261011/config.yaml.pre-session-reset`。
 
 ## 已移除
 

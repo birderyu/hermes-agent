@@ -20,7 +20,7 @@
 
 - 闲置 24 小时、每天 4 点自动开新会话的机制，v0.21.6 起移到插件 `hermes-session-reset-policy`。旧代码里它只作用于消息渠道的会话（`gateway/session.py` 的 `SessionStore`）；API server 的会话由客户端指定，不经过它，所以 Ollo 本来就不受影响。不用 iMessage 后，决定不装。
 - 语言覆盖只改写自动重置时的提示文案，随之删除：仓库里的 `custom/runtime/` 删除；运行环境的 `~/.hermes/locales/zh.yaml`、`en.yaml`（和仓库版本一致）移到 `~/.hermes/backups/cleanup-20261011/locales/`，空目录 `~/.hermes/locales` 删除。回滚：把两个文件移回去。
-- `config.yaml` 的 `session_reset` 块没动，网关启动和 `hermes doctor` 仍会提示它不再生效。
+- 用户随后同意删掉 `~/.hermes/config.yaml` 里的 `session_reset` 块（4 行）。删除前整份配置备份为 `~/.hermes/backups/cleanup-20261011/config.yaml.pre-session-reset`；删除后 `hermes config get` 能正常读取其他设置。不用专门重启，下次网关重启后就不再有那条警告。回滚：把备份复制回去。
 
 ## 清理旧工作副本 2f00
 
@@ -38,4 +38,3 @@ zsh 下 `source ./activate` 会失败：`scripts/_activation.sh` 查找 Windows 
 
 - 4 个 GTD 定时任务仍然投递到 iMessage（Photon）。等 Ollo bridge 完成后改投 Ollo，之后可以关掉网关的 Photon 平台（要改 `~/.hermes` 的配置）。
 - 撤回提交待部署，可以和 Ollo bridge 的部署合并，少重启一次网关。
-- 可选：删掉 `config.yaml` 里的 `session_reset` 块，消除启动提示。
