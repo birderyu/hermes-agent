@@ -1,6 +1,8 @@
 # birderyu/hermes-agent 个人 fork
 
-本 fork 的 `custom` 分支是 Mac mini 上实际运行的 Hermes Agent：官方正式发行版，加上少量个人补丁和 Ollo 的服务端插件。本目录记录这个 fork 怎么修改、怎么升级、怎么部署，以及每次修订的经过。维护 fork 只看这里。
+本目录是 `custom` 分支的说明书和台账。`custom` 分支就是 Mac mini 上实际运行的 Hermes Agent：官方正式发行版，加上少量个人补丁和 Ollo 的服务端插件。这里记录这个 fork 怎么修改、怎么升级、怎么部署，以及每次修订的经过。维护 fork 只看这里。
+
+目录和分支同名，沿用下游在源码里用自己名字建目录的惯例（例如 Debian 的 `debian/`）。只在 `custom` 分支上存在的说明、补丁清单、修订记录和部署用文件都放在这里；插件源码另放在 `hermes-plugins/`。2026-10-11 之前这个目录叫 `fork/`。
 
 官方仓库：[NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)。仓库根目录的 `README.md`、`AGENTS.md` 等是官方文件，不在这里改。
 

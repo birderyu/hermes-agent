@@ -1,5 +1,5 @@
 # Hermes 用户语言覆盖层：部署到 $HERMES_HOME/locales/zh.yaml（v0.21.6 起支持）。
-# 只覆盖这里列出的键，其余沿用 locales/zh.yaml。来源与原因见 fork/patches.md「运行时语言覆盖」。
+# 只覆盖这里列出的键，其余沿用 locales/zh.yaml。来源与原因见 custom/patches.md「运行环境里的非代码调整 → 语言覆盖」。
 gateway:
   session:
     # 只在会话被停止或中断后自动重置时发送；上一会话并没有被清空，仍在历史里。
