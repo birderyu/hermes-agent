@@ -1,0 +1,9 @@
+{
+  "claim_id": "70000000-0000-4000-8000-000000000001",
+  "runtime": {
+    "source": "tool",
+    "session_id": "fixture-session",
+    "task_id": "fixture-task",
+    "tool_call_id": "fixture-tool"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "attempt_id": "60000000-0000-4000-8000-000000000002",
+  "runtime": {
+    "source": "api",
+    "operation_id": "60000000-0000-4000-8000-000000000001"
+  },
+  "outcome": {
+    "kind": "capture",
+    "status": "succeeded",
+    "item_id": "fixture-captured-reminder"
+  }
+}

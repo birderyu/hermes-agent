@@ -1,16 +1,18 @@
 # Ollo 会话插件
 
-`ollo-conversation` 提供 App 会话发现、Ollo 身份约定和最终回复的语气分类。部署文件为 `plugin.yaml`、`__init__.py`、`mood.py`。无需依赖收件箱/位置插件，无数据库迁移或新监听端口；每条符合条件的最终回复增加一次辅助模型分类。
+`ollo-conversation` 提供 App 会话发现、Ollo 身份约定和可选的最终回复语气分类。部署文件为 `plugin.yaml`、`__init__.py`、`mood.py`。无需依赖收件箱/位置插件，无数据库迁移或新监听端口；语气分类默认开启，可通过 `mood` 关闭。
 
 ## 配置和接口
 
-当前 Hermes home 的 `ollo/conversation.json`：
+当前 Hermes home 的 `ollo/conversation.json`（Ollo 网关已接管语气分类时）：
 
 ```json
-{"session_id":"EXISTING_API_SESSION_ID","name":"Ollo"}
+{"session_id":"EXISTING_API_SESSION_ID","name":"Ollo","mood":false}
 ```
 
 `ollo/` 不存在时读取 `hermes-plus/conversation.json`；新目录存在但文件缺失时不混读旧配置。兼容旧文件省略 `name`，默认返回 `Ollo`。`session_id` 必须为 1–256 位字母、数字、下划线、点或短横线；`name` 是 1–100 字符的非空字符串。配置在插件加载时读取，更改后须重新加载（部署时排空重启）。与收件箱的 `session_id` 保持一致。
+
+`mood` 是可选布尔字段，缺省或 `true` 保持原有分类行为。Ollo 网关自己判断语气、先发回复再补发语气时，应设为 `false`，避免 Hermes 再同步等待一次分类。字符串 `"false"`、数字、`null`、数组或对象均使整份配置无效：发现接口返回 503，不注入身份或改写回复，沿用只记录异常类型、不记录配置内容的警告日志。此开关不改变有效配置下的身份注入和会话发现；发现接口仍只返回 `{session_id,name}`，不返回 `mood`。
 
 - `GET /v1/ollo/conversation`，兼容别名 `GET /v1/hermes-plus/conversation`。
 - 复用 API server 的 `_expected_api_key()` / `_check_auth()`，无/错 Bearer key 返回 401；服务端没有可用密钥返回 503。
@@ -26,6 +28,10 @@
 ## 最终回复的语气
 
 主回复写完后，`transform_llm_output(response_text, session_id, platform, turn_id, …)` 改写最终文本。此钩子在最终 assistant 消息首次持久化之前运行，改写结果进入 SQLite 存档、后续对话回放、`/v1/runs/{run_id}` 的 `output` 和 `run.completed` 事件。`post_llm_call` 是结果观察钩子，不能用于这次改写。语气在最终结果中交付，不改写已经发出的流式文本片段。
+
+**关闭时（`mood=false`）**，不暂存本轮输入、不调用分类器或辅助模型，也不等待分类超时；只清除模型自行生成的顶层 `ollo-mood` 围栏（包括未闭合的尾部围栏），保留正文、代码示例内部的围栏以及 `hermes-plus-gtd` / `-confirm` / `-result` 等其他围栏，不追加任何围栏。没有语气围栏的正文原样返回；仅有语气围栏时使用换行占位，防止宿主忽略空字符串替换而留下原围栏。`ollo_mood` 辅助任务仍注册，但注册本身不会调用模型。
+
+以下分类流程仅适用于 **缺省或 `mood=true`**：
 
 插件使用 Hermes 提供的 `ctx.llm.complete(task='ollo_mood')`，注册自己的辅助任务并复用宿主的模型路由、凭据、Profile 和日志机制，不建立独立模型客户端、不读取额外密钥。默认使用宿主的辅助模型自动选择，偏好快速模型并关闭推理；需要指定时可通过当前 Profile 的 `config.yaml` 中 `auxiliary.ollo_mood` 配置 `provider` / `model` 等宿主已有字段。已有可用的宿主辅助模型路由时，本次更新不必修改配置；不会借用或改写其他辅助任务的配置。
 
@@ -55,12 +61,13 @@
 
 **本次只更新已经启用的 `ollo-conversation`。以下实际部署操作须用户另行同意，本仓库修改和沙箱测试不执行它们：**
 
-1. 备份运行环境中现有的 `ollo-conversation` 目录，核对新版本三个部署文件齐全，然后只替换该插件目录。保留现有启用项和 `ollo/conversation.json`；本次不涉及 inbox/location、APNs、定时任务、Hermes 核心或数据迁移。
-2. 排空正在运行的请求，在批准的窗口重启网关，使新钩子和辅助任务注册生效。
-3. 用新旧 conversation 路径各验一次认证与返回值；通过 Ollo App 验收生病问题及其续问为 `concerned`、无关好消息为 `happy`、一般信息为无围栏，核对存档和 `/v1/runs` 最终结果都只有一个末尾围栏，日程围栏在它之前。压缩续接后重复验证，并确认 iMessage 等其他渠道无变化。辅助模型故障时应在 3 秒左右返回未标语气的正文并记录降级日志。
+1. 备份运行环境中现有的 `ollo-conversation` 目录及会话配置；在批准的窗口排空正在运行的请求，再替换插件文件。完整部署复制本目录的 `__init__.py`、`mood.py`、`plugin.yaml`，README 可随附，测试文件无需部署。本次代码变更仅在 `__init__.py`，另外两个运行文件保留配套版本。保留现有启用项和会话配置中的 `session_id` / `name`，在 Ollo 网关接管语气后增加 `"mood":false`。不涉及 inbox/location、APNs、定时任务、Hermes 核心或数据迁移。
+2. 排空后重启 **Hermes 网关**，使新插件代码和加载时读取的配置生效；只复制文件或编辑 JSON 不会改变已加载实例的行为。
+3. 用新旧 conversation 路径各验一次认证与返回值，确认仍只有 `{session_id,name}`。关闭分类时，通过 Ollo App 核对回复不再等待 Hermes 语气分类，插件没有发起 `ollo_mood` 辅助调用，存档、`/v1/runs` 和 `run.completed` 最终结果无顶层语气围栏、日程围栏保留；再验收 Ollo 网关补发的语气。压缩续接后重复验证，并确认 iMessage 等其他渠道无变化。
+4. 若保留缺省或 `mood=true`，沿用原验收：生病问题及其续问为 `concerned`、无关好消息为 `happy`、一般信息为无围栏；分类成功时最终结果只有一个末尾围栏，日程围栏在它之前。辅助模型故障时应在 3 秒左右返回未标语气的正文并记录降级日志。
 
-如当前辅助路由不可用或实测分类质量、时延不合适，先审核所选 `auxiliary.ollo_mood` 路由，再经用户同意修改配置及重启；不要为分类另加凭据环境变量。沙箱测试替换模型网络边界，不能代替这一步真实模型验收。
+开启 Hermes 分类时，如当前辅助路由不可用或实测分类质量、时延不合适，先审核所选 `auxiliary.ollo_mood` 路由，再经用户同意修改配置及重启；不要为分类另加凭据环境变量。沙箱测试替换模型网络边界，不能代替这一步真实模型验收。
 
-回滚也需另行同意：恢复备份的整个 `ollo-conversation` 目录，若另行改过辅助任务配置则一并恢复，再排空并重启网关。不删除或重写历史消息；回滚前已经存档的语气围栏保留。
+回滚也需另行同意：排空请求后恢复备份的整个 `ollo-conversation` 目录及会话配置，若另行改过辅助任务配置则一并恢复，再重启网关。旧代码不识别 `mood=false`，回滚旧代码会恢复 Hermes 分类等待；新代码将开关改回 `true` 或删除后也须排空重启。不删除或重写历史消息；回滚前已经存档的语气围栏保留。
 
 首次安装及此前的改名、配置/数据迁移见 [统一部署清单](../README.md#部署清单以下每一步均需用户另行同意)，不要把那份完整迁移流程当作本次更新的必需步骤。

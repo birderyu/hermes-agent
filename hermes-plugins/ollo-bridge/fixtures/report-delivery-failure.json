@@ -1,0 +1,10 @@
+{
+  "job_id": "fixture-agenda-job",
+  "execution_id": "50000000-0000-4000-8000-000000000005",
+  "execution_started_at": "2026-10-11T09:30:00+08:00",
+  "title": "今日安排",
+  "body": "合成测试：任务依赖暂不可用。",
+  "business_date": "2026-10-11",
+  "trigger_id": "60000000-0000-4000-8000-000000000005",
+  "delivery_kind": "failure"
+}

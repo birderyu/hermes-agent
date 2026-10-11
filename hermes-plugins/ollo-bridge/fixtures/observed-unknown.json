@@ -1,0 +1,9 @@
+{
+  "status": "unknown",
+  "outcome": {
+    "kind": "capture",
+    "status": "unknown",
+    "reason": "示例响应在 commit 后丢失",
+    "retryable": false
+  }
+}

@@ -6,10 +6,11 @@ import pytest
 
 
 @pytest.fixture
-def ollo(runtime, isolated_home, monkeypatch):
+def ollo(runtime, isolated_home, monkeypatch, request):
     directory = isolated_home / 'ollo'
     directory.mkdir()
-    (directory / 'conversation.json').write_text('{"session_id":"root"}')
+    options = getattr(request, 'param', {})
+    (directory / 'conversation.json').write_text(json.dumps({'session_id': 'root', **options}), encoding='utf-8')
     with runtime() as r:
         from hermes_cli import plugins
         monkeypatch.setattr(plugins, 'get_plugin_manager', lambda: r.manager)
@@ -36,6 +37,7 @@ def transform(r, text, turn='turn', *, session='tip', platform='api_server'):
 
 
 @pytest.mark.parametrize('label', ['concerned', 'happy', 'none'])
+@pytest.mark.parametrize('ollo', [{}, {'mood': True}], indirect=True)
 def test_classifier_owns_the_only_trailing_mood_and_preserves_schedule(ollo, monkeypatch, label):
     from agent import auxiliary_client
     calls = []
@@ -59,6 +61,54 @@ def test_classifier_owns_the_only_trailing_mood_and_preserves_schedule(ollo, mon
     assert payload['assistant_response'] == before
     assert '发烧' in json.dumps(payload['recent_context'], ensure_ascii=False)
     assert 'ollo-mood' not in prepare(ollo, turn='next')[0]['context']
+
+
+@pytest.mark.parametrize('ollo', [{'mood': False}], indirect=True)
+def test_disabled_mood_releases_input_and_returns_clean_body_without_classifying(ollo, monkeypatch):
+    import gc
+    import sys
+    import time
+    import weakref
+    from unittest.mock import Mock
+    from agent import auxiliary_client
+    from agent.plugin_llm import PluginLlm
+    plugin = ollo.manager._plugins['ollo-conversation'].module
+    mood = sys.modules[plugin.__name__ + '.mood']
+    classify, complete = Mock(return_value='happy'), Mock()
+    monkeypatch.setattr(mood.Classifier, 'classify', classify)
+    monkeypatch.setattr(PluginLlm, 'complete', complete)
+    assert auxiliary_client._get_auxiliary_task_config(mood.TASK)['timeout'] == mood.TIMEOUT
+
+    class UserText(str):
+        pass
+
+    user = UserText('本轮输入不应被插件留存')
+    reference = weakref.ref(user)
+    assert prepare(ollo, user=user) == [{'context': plugin.CONVENTIONS}]
+    del user
+    gc.collect()
+    assert reference() is None
+
+    example = '````text\n```ollo-mood\n{"mood":"happy"}\n```\n````'
+    schedule = '\n\n'.join('```' + tag + '\n{"ok":true}\n```'
+        for tag in ('hermes-plus-gtd', 'hermes-plus-gtd-confirm', 'hermes-plus-gtd-result'))
+    body = '回复正文。\n\n' + example + '\n\n' + schedule
+    fence = '```ollo-mood\n{"mood":"happy"}\n```'
+    started = time.monotonic()
+    for raw, expected in (
+        ('原样保留空白。\n\n', '原样保留空白。\n\n'),
+        (body, body),
+        (body + '\n\n' + fence + '\n\n~~~ollo-mood\n{"mood":"concerned"}\n~~~', body),
+        (fence + '\n' + body, body),
+        (body + '\n\n```ollo-mood\n{"mood":"happy"}', body),
+        (fence, '\n'),
+    ):
+        assert transform(ollo, raw) == expected
+    assert time.monotonic() - started < 2
+    for session, platform in (('other', 'api_server'), ('branch', 'api_server'), ('tip', 'photon')):
+        assert transform(ollo, fence, session=session, platform=platform) == fence
+    classify.assert_not_called()
+    complete.assert_not_called()
 
 
 @pytest.mark.parametrize('outcome', [RuntimeError('private text must not be logged'), TimeoutError('secret timeout'), AttributeError('auxiliary unavailable'), None, 'HAPPY', 'not happy', '{"mood":"happy"}'])
@@ -149,6 +199,7 @@ def test_mood_removal_respects_other_fences_and_incomplete_marker_tail():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('ollo', [{}, {'mood': True}, {'mood': False}], indirect=True)
 async def test_classified_text_is_stored_replayed_and_returned_by_runs(ollo, monkeypatch):
     import asyncio
     from unittest.mock import MagicMock, patch
@@ -166,7 +217,8 @@ async def test_classified_text_is_stored_replayed_and_returned_by_runs(ollo, mon
     metadata = lambda *a, **k: {'fake/model': {'context_length': 128000}}
     monkeypatch.setattr('agent.model_metadata.fetch_model_metadata', metadata)
     monkeypatch.setattr('agent.agent_init.fetch_model_metadata', metadata)
-    raw = '回复正文。\n\n```hermes-plus-gtd-result\n{"ok":true}\n```'
+    body = '回复正文。\n\n```hermes-plus-gtd-result\n{"ok":true}\n```'
+    raw = body + '\n\n```ollo-mood\n{"mood":"happy"}\n```'
     def primary(**kwargs):
         return SimpleNamespace(choices=[SimpleNamespace(
             message=SimpleNamespace(content=raw, tool_calls=None, reasoning=None), finish_reason='stop')],
@@ -194,13 +246,14 @@ async def test_classified_text_is_stored_replayed_and_returned_by_runs(ollo, mon
     response = await ollo.api._handle_get_run(request)
     status = json.loads(response.body)
     assert response.status == 200 and status['status'] == 'completed', status
-    expected = raw + '\n\n```ollo-mood\n{"mood":"concerned"}\n```'
+    enabled = json.loads((ollo.home / 'ollo/conversation.json').read_text(encoding='utf-8')).get('mood', True)
+    expected = body + '\n\n```ollo-mood\n{"mood":"concerned"}\n```' if enabled else body
     assert status['output'] == expected
     rows = ollo.db.get_messages('tip')
     assert [row['content'] for row in rows if row['role'] == 'assistant'] == [expected]
     replay = ollo.db.get_messages_as_conversation('tip')
     assert replay[-1]['content'] == expected
-    assert sum(call['task'] == 'ollo_mood' for call in calls) == 1
+    assert sum(call['task'] == 'ollo_mood' for call in calls) == int(enabled)
     user = next(row for row in rows if row['role'] == 'user')
     assert 'Ollo' in user['api_content'] and 'ollo-mood' not in user['api_content']
     # The terminal event and closing sentinel are queued with call_soon.

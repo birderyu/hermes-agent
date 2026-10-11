@@ -1,0 +1,14 @@
+{
+  "report": {
+    "id": "30000000-0000-4000-8000-000000000005",
+    "sequence": 5,
+    "title": "今日安排",
+    "body": "没有生成",
+    "created_at": 1791682200.0,
+    "delivery_kind": "failure",
+    "gtd": null,
+    "gtd_kind": null,
+    "gtd_counts": null
+  },
+  "raw_body": "合成测试：任务依赖暂不可用。"
+}

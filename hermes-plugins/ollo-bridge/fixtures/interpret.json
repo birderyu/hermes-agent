@@ -1,0 +1,107 @@
+{
+  "request": {
+    "report_id": "30000000-0000-4000-8000-000000000002",
+    "item_id": "fixture-reminder-1",
+    "text": "明天整理，放到工作",
+    "current_suggestion": {
+      "action": "do",
+      "title": "整理示例资料",
+      "destination": "工作",
+      "due": "2026-10-12",
+      "waiting_for": null,
+      "follow_up": null,
+      "event": null,
+      "merge_into": null
+    }
+  },
+  "item": {
+    "id": "fixture-reminder-1",
+    "source": "reminder",
+    "title": "示例资料",
+    "list": "收件箱",
+    "created_at": "2026-10-11T09:30:00+08:00",
+    "notes": "仅用于合同测试",
+    "status": "undecided",
+    "reason": "需要选择下一步",
+    "findings": [
+      {
+        "type": "duplicate",
+        "with": "fixture-reminder-2",
+        "title": "另一条示例资料"
+      },
+      {
+        "type": "conflict",
+        "with": "fixture-event-1",
+        "title": "示例活动",
+        "start": "2026-10-12T10:00:00+08:00"
+      },
+      {
+        "type": "expired",
+        "detail": "示例日期已过去"
+      },
+      {
+        "type": "missing",
+        "label": "补充准备",
+        "change": {
+          "op": "create_reminder",
+          "title": "准备示例材料",
+          "list": "工作",
+          "due": "2026-10-12",
+          "alarm": "2026-10-12T08:00:00+08:00"
+        }
+      }
+    ],
+    "suggestion": {
+      "action": "do",
+      "title": "整理示例资料",
+      "destination": "工作",
+      "due": "2026-10-12",
+      "waiting_for": null,
+      "follow_up": null,
+      "event": null,
+      "merge_into": null
+    },
+    "choices": {
+      "titles": [
+        "整理示例资料",
+        "示例资料"
+      ],
+      "people": [
+        "示例联系人"
+      ],
+      "dates": [
+        "2026-10-12"
+      ],
+      "arrangements": [
+        {
+          "label": "把示例活动推后一小时",
+          "changes": [
+            {
+              "op": "update_event",
+              "item": "fixture-event-1",
+              "start": "2026-10-12T11:00:00+08:00",
+              "minutes": 60
+            }
+          ]
+        }
+      ],
+      "extras": [
+        {
+          "label": "补充准备",
+          "change": {
+            "op": "create_reminder",
+            "title": "准备示例材料",
+            "list": "工作",
+            "due": "2026-10-12",
+            "alarm": "2026-10-12T08:00:00+08:00"
+          }
+        }
+      ]
+    }
+  },
+  "allowed_item_ids": [
+    "fixture-reminder-1",
+    "fixture-reminder-2",
+    "fixture-event-1"
+  ]
+}

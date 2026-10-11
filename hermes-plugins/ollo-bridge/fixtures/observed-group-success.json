@@ -1,0 +1,17 @@
+{
+  "status": "succeeded",
+  "outcome": {
+    "kind": "gtd_group",
+    "status": "succeeded",
+    "results": [
+      {
+        "index": 0,
+        "status": "done"
+      },
+      {
+        "index": 1,
+        "status": "done"
+      }
+    ]
+  }
+}

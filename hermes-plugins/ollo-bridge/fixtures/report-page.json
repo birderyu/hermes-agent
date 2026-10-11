@@ -1,0 +1,84 @@
+{
+  "reports": [
+    {
+      "report": {
+        "id": "30000000-0000-4000-8000-000000000001",
+        "sequence": 1,
+        "title": "今日安排",
+        "body": "这是一份合成的合同示例报告。",
+        "created_at": 1791682200.0,
+        "mood": null,
+        "gtd": {
+          "version": 1,
+          "kind": "agenda",
+          "generated_at": "2026-10-11T09:30:00+08:00",
+          "counts": {
+            "events": 1,
+            "due": 1
+          },
+          "items": [],
+          "agenda": {
+            "date": "2026-10-11",
+            "events": [
+              {
+                "id": "fixture-event-1",
+                "title": "示例活动",
+                "start": "2026-10-11T10:00:00+08:00",
+                "end": "2026-10-11T11:00:00+08:00",
+                "calendar": "工作"
+              }
+            ],
+            "due": [
+              {
+                "id": "fixture-reminder-1",
+                "title": "示例资料",
+                "list": "收件箱",
+                "due": "2026-10-11",
+                "overdue_days": 0
+              }
+            ],
+            "focus": [
+              {
+                "id": "fixture-reminder-1",
+                "title": "示例资料",
+                "list": "收件箱",
+                "reason": "先完成准备",
+                "preselected": true
+              }
+            ],
+            "focus_limit": 2,
+            "inbox_pending": 1
+          },
+          "originals": {
+            "fixture-reminder-1": {
+              "source": "reminder",
+              "title": "示例资料",
+              "list": "收件箱",
+              "due": "2026-10-11",
+              "completed": false,
+              "modified_at": "2026-10-11T09:30:00+08:00"
+            },
+            "fixture-event-1": {
+              "source": "event",
+              "title": "示例活动",
+              "list": "工作",
+              "due": null,
+              "completed": false,
+              "modified_at": "2026-10-11T09:30:00+08:00",
+              "start": "2026-10-11T10:00:00+08:00",
+              "end": "2026-10-11T11:00:00+08:00"
+            }
+          }
+        },
+        "gtd_kind": "agenda",
+        "gtd_counts": {
+          "events": 1,
+          "due": 1
+        },
+        "delivery_kind": "report"
+      },
+      "raw_body": "这是一份合成报告。\n```hermes-plus-gtd\n{\"version\": 1, \"kind\": \"agenda\", \"generated_at\": \"2026-10-11T09:30:00+08:00\", \"counts\": {\"events\": 1, \"due\": 1}, \"items\": [], \"agenda\": {\"date\": \"2026-10-11\", \"events\": [{\"id\": \"fixture-event-1\", \"title\": \"示例活动\", \"start\": \"2026-10-11T10:00:00+08:00\", \"end\": \"2026-10-11T11:00:00+08:00\", \"calendar\": \"工作\"}], \"due\": [{\"id\": \"fixture-reminder-1\", \"title\": \"示例资料\", \"list\": \"收件箱\", \"due\": \"2026-10-11\", \"overdue_days\": 0}], \"focus\": [{\"id\": \"fixture-reminder-1\", \"title\": \"示例资料\", \"list\": \"收件箱\", \"reason\": \"先完成准备\", \"preselected\": true}], \"focus_limit\": 2, \"inbox_pending\": 1}, \"originals\": {\"fixture-reminder-1\": {\"source\": \"reminder\", \"title\": \"示例资料\", \"list\": \"收件箱\", \"due\": \"2026-10-11\", \"completed\": false, \"modified_at\": \"2026-10-11T09:30:00+08:00\"}, \"fixture-event-1\": {\"source\": \"event\", \"title\": \"示例活动\", \"list\": \"工作\", \"due\": null, \"completed\": false, \"modified_at\": \"2026-10-11T09:30:00+08:00\", \"start\": \"2026-10-11T10:00:00+08:00\", \"end\": \"2026-10-11T11:00:00+08:00\"}}}\n```"
+    }
+  ],
+  "has_more": false
+}

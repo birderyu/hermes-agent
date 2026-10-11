@@ -1,0 +1,3393 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "B_BridgeReportDelivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "job_id",
+        "execution_id",
+        "execution_started_at",
+        "title",
+        "body",
+        "delivery_kind"
+      ],
+      "properties": {
+        "job_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "\\S"
+        },
+        "execution_id": {
+          "$ref": "#/$defs/B_UUID"
+        },
+        "execution_started_at": {
+          "$ref": "#/$defs/B_ISODateTime"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        },
+        "body": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128000,
+          "pattern": "\\S",
+          "x-max-utf8-bytes": 128000
+        },
+        "business_date": {
+          "$ref": "#/$defs/B_ISODate"
+        },
+        "trigger_id": {
+          "$ref": "#/$defs/B_UUID"
+        },
+        "delivery_kind": {
+          "$ref": "#/$defs/B_DeliveryKind"
+        }
+      },
+      "description": "仅 live adapter 与宿主持久 delivery queue；身份/执行开始时间来自可信宿主。agenda 必须带 business_date（由任务时区和原执行日期确定），wake 时带 trigger_id；网关按 job 白名单判类别，不能相信模型日期。保留最后 GTD 原围栏，缺 UUID/可信日期拒收；执行早于部署截点则 409/stale_execution。 gtd.kind 必须匹配白名单类别，否则按坏结构降级纯文本，不从模型输出修改任务类别。 delivery_kind 必填且来自宿主本次执行的可信失败标记。failure 忽略所有 GTD 围栏，公开 body 为「没有生成」、gtd=null；原 body 可保存为不可变 raw_body，但不进入锁屏，不占 agenda 日账、不触发 suppressed，兜底正常生成；report 才参与 agenda 成功日账。"
+    },
+    "B_UUID": {
+      "$ref": "#/$defs/P_UUID"
+    },
+    "P_UUID": {
+      "type": "string",
+      "format": "uuid",
+      "minLength": 36,
+      "maxLength": 36,
+      "description": "UUID 字符串；内部规范化大小写，客户端不从 ID 推导时间。"
+    },
+    "B_ISODateTime": {
+      "$ref": "#/$defs/P_ISODateTime"
+    },
+    "P_ISODateTime": {
+      "type": "string",
+      "format": "date-time",
+      "maxLength": 64,
+      "description": "ISO 8601 时间字符串，必须带时区；支持小数秒。"
+    },
+    "B_ISODate": {
+      "$ref": "#/$defs/P_ISODate"
+    },
+    "P_ISODate": {
+      "type": "string",
+      "format": "date",
+      "minLength": 10,
+      "maxLength": 10,
+      "description": "ISO 8601 日期 YYYY-MM-DD（Asia/Shanghai），不是时间戳。"
+    },
+    "B_DeliveryKind": {
+      "$ref": "#/$defs/P_DeliveryKind"
+    },
+    "P_DeliveryKind": {
+      "type": "string",
+      "enum": [
+        "report",
+        "failure"
+      ],
+      "description": "可信宿主标记的投递类型；正式报告为 report，任务失败通知为 failure，不按正文或模型结果猜测。"
+    },
+    "B_BridgeReportReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "sequence",
+        "suppressed"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/B_UUID"
+        },
+        "sequence": {
+          "$ref": "#/$defs/B_Sequence"
+        },
+        "suppressed": {
+          "type": "boolean"
+        }
+      },
+      "description": "首次 201；同 execution 同 delivery_kind/标题/正文 200 返回同身份，异内容 409。delivery_kind=report 的 agenda 当天另一 execution 200/suppressed=true，返回已存报告且不推送；被抑制 execution 也持久记录指纹。成功只在报告/推送同事务提交后返回。 failure 始终 suppressed=false，不读取或写入 agenda 成功日账；delivery_kind 是同执行重放指纹的一部分，异类型重放返回 409/request_id_conflict。"
+    },
+    "B_Sequence": {
+      "$ref": "#/$defs/P_Sequence"
+    },
+    "P_Sequence": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9223372036854775807,
+      "description": "递增序号（Int64），不是时间；同一 grant 内严格递增。"
+    },
+    "B_BridgeReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "report",
+        "raw_body"
+      ],
+      "properties": {
+        "report": {
+          "$ref": "#/$defs/B_Report"
+        },
+        "raw_body": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128000,
+          "x-max-utf8-bytes": 128000,
+          "pattern": "\\S"
+        }
+      },
+      "description": "report.gtd 含完整已保存 originals；raw_body 是收到的不可变原文，含围栏。资料不等于用户确认。"
+    },
+    "B_Report": {
+      "$ref": "#/$defs/P_Report"
+    },
+    "P_Report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "sequence",
+        "title",
+        "body",
+        "created_at",
+        "gtd",
+        "delivery_kind"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/P_UUID"
+        },
+        "sequence": {
+          "$ref": "#/$defs/P_Sequence"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        },
+        "body": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128000,
+          "x-max-utf8-bytes": 128000,
+          "description": "展示正文；合法 gtd 围栏移到 gtd；坏围栏保留完整文字。"
+        },
+        "created_at": {
+          "$ref": "#/$defs/P_UnixSeconds"
+        },
+        "mood": {
+          "$ref": "#/$defs/P_Mood"
+        },
+        "gtd": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/P_GTDReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gtd_kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/P_GTDKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gtd_counts": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/P_GTDCounts"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "delivery_kind": {
+          "$ref": "#/$defs/P_DeliveryKind"
+        }
+      },
+      "description": "id/Unix 秒沿用 InboxReport，URL 仍用 report_id；只保存切换后新报告。gtd_kind/gtd_counts 如返回必须与 gtd 一致，坏结构为 null；originals 可从 App 响应省略。 delivery_kind 必须返回；failure 为纯文字「没有生成」、gtd=null（gtd_kind/gtd_counts 如返回也为 null），标题来自可信任务类别，不占 agenda 日账、不被同日成功报告 suppressed。",
+      "dependentRequired": {
+        "gtd_kind": [
+          "gtd_counts"
+        ],
+        "gtd_counts": [
+          "gtd_kind"
+        ]
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "gtd": {
+                "type": "null"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "gtd_kind": {
+                "type": "null"
+              },
+              "gtd_counts": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "gtd": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "agenda"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "gtd_kind": {
+                "const": "agenda"
+              },
+              "gtd_counts": {
+                "$ref": "#/$defs/P_GTDAgendaCounts"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "gtd": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "inbox"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "gtd_kind": {
+                "const": "inbox"
+              },
+              "gtd_counts": {
+                "$ref": "#/$defs/P_GTDInboxCounts"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "gtd": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "review"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "gtd_kind": {
+                "const": "review"
+              },
+              "gtd_counts": {
+                "$ref": "#/$defs/P_GTDReviewCounts"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "delivery_kind": {
+                "const": "failure"
+              }
+            },
+            "required": [
+              "delivery_kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "gtd": {
+                "type": "null"
+              },
+              "body": {
+                "const": "没有生成"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "P_UnixSeconds": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 253402300799,
+      "description": "Unix 秒（自 1970-01-01T00:00:00Z，可含小数），不是毫秒；必须有限。"
+    },
+    "P_Mood": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "happy",
+        "concerned",
+        null
+      ],
+      "description": "没有就是平常；客户端遇到不认识的值也按平常处理"
+    },
+    "P_GTDReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "kind",
+        "generated_at",
+        "counts",
+        "items"
+      ],
+      "properties": {
+        "version": {
+          "type": "integer",
+          "const": 1
+        },
+        "kind": {
+          "$ref": "#/$defs/P_GTDKind"
+        },
+        "generated_at": {
+          "$ref": "#/$defs/P_ISODateTime"
+        },
+        "counts": {
+          "$ref": "#/$defs/P_GTDCounts"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P_GTDItem"
+          },
+          "minItems": 0,
+          "maxItems": 100
+        },
+        "agenda": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/P_GTDAgenda"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "originals": {
+          "$ref": "#/$defs/P_GTDOriginals"
+        }
+      },
+      "description": "hermes-plus-gtd v1：取最后一个顶层围栏；缺失/坏块整份纯文本降级，不能回捞更早块。所有引用/原值关系及重复 item ID 由业务验证。 GTD 主事项、agenda、关联事项、建议、候选与变更中的标题均最多 4096 UTF-8 字节；originals 标题无损保存。字段扩容不放宽投递 body 的 128000 UTF-8 字节总限额。",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "inbox"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "counts": {
+                "$ref": "#/$defs/P_GTDInboxCounts"
+              },
+              "agenda": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "agenda"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "counts": {
+                "$ref": "#/$defs/P_GTDAgendaCounts"
+              },
+              "agenda": {
+                "$ref": "#/$defs/P_GTDAgenda"
+              },
+              "items": {
+                "maxItems": 0
+              }
+            },
+            "required": [
+              "agenda"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "review"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "counts": {
+                "$ref": "#/$defs/P_GTDReviewCounts"
+              },
+              "agenda": {
+                "type": "null"
+              },
+              "items": {
+                "items": {
+                  "required": [
+                    "group"
+                  ],
+                  "properties": {
+                    "group": {
+                      "type": "string",
+                      "enum": [
+                        "overdue",
+                        "waiting",
+                        "someday",
+                        "next7"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "P_GTDKind": {
+      "type": "string",
+      "enum": [
+        "agenda",
+        "inbox",
+        "review"
+      ]
+    },
+    "P_GTDCounts": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/P_GTDInboxCounts"
+        },
+        {
+          "$ref": "#/$defs/P_GTDAgendaCounts"
+        },
+        {
+          "$ref": "#/$defs/P_GTDReviewCounts"
+        }
+      ]
+    },
+    "P_GTDInboxCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pending",
+        "handled",
+        "undecided"
+      ],
+      "properties": {
+        "pending": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "handled": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "undecided": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        }
+      },
+      "description": "数量单位条/个，0–10000；仅这些数量可进入锁屏，不含事项标题。"
+    },
+    "P_GTDAgendaCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "events",
+        "due"
+      ],
+      "properties": {
+        "events": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "due": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        }
+      },
+      "description": "数量单位条/个，0–10000；仅这些数量可进入锁屏，不含事项标题。"
+    },
+    "P_GTDReviewCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "overdue",
+        "waiting",
+        "someday",
+        "next7",
+        "handled",
+        "undecided"
+      ],
+      "properties": {
+        "overdue": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "waiting": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "someday": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "next7": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "handled": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "undecided": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        }
+      },
+      "description": "数量单位条/个，0–10000；仅这些数量可进入锁屏，不含事项标题。"
+    },
+    "P_GTDItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "source",
+        "title",
+        "status",
+        "findings",
+        "suggestion"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/P_ItemID"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "reminder",
+            "event"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "\\S",
+          "x-max-utf8-bytes": 4096,
+          "description": "事项完整标题，最多 4096 UTF-8 字节，与 capture/ScheduleItem 一致；不截断。"
+        },
+        "list": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "\\S"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/P_ISODateTime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 4096
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "group": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "overdue",
+                "waiting",
+                "someday",
+                "next7"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "handled",
+            "undecided"
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 1024
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P_GTDFinding"
+          },
+          "minItems": 0,
+          "maxItems": 20
+        },
+        "suggestion": {
+          "$ref": "#/$defs/P_GTDSuggestion"
+        },
+        "choices": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/P_GTDChoices"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "P_ItemID": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^[^,\\r\\n]+$",
+      "description": "Apple 稳定事项 ID，优先 external identifier；沿用 CSV 查询，故不能包含逗号或换行。"
+    },
+    "P_GTDFinding": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "with",
+            "title"
+          ],
+          "properties": {
+            "type": {
+              "const": "duplicate"
+            },
+            "with": {
+              "$ref": "#/$defs/P_ItemID"
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "\\S",
+              "x-max-utf8-bytes": 4096
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "with",
+            "title",
+            "start"
+          ],
+          "properties": {
+            "type": {
+              "const": "conflict"
+            },
+            "with": {
+              "$ref": "#/$defs/P_ItemID"
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "\\S",
+              "x-max-utf8-bytes": 4096
+            },
+            "start": {
+              "$ref": "#/$defs/P_ISODateTime"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "detail"
+          ],
+          "properties": {
+            "type": {
+              "const": "expired"
+            },
+            "detail": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "pattern": "\\S"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "label",
+            "change"
+          ],
+          "properties": {
+            "type": {
+              "const": "missing"
+            },
+            "label": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "\\S"
+            },
+            "change": {
+              "$ref": "#/$defs/P_GTDChange"
+            }
+          }
+        }
+      ],
+      "description": "沿用 Finding 的四种 type；关联 ID 必须来自报告生成时的真实只读采集。"
+    },
+    "P_GTDChange": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "item"
+          ],
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "update"
+            },
+            "item": {
+              "$ref": "#/$defs/P_ItemID"
+            },
+            "title": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096,
+                  "pattern": "\\S",
+                  "x-max-utf8-bytes": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "list": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "\\S"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "due": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/P_GTDDate"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "waiting_for": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "\\S"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "follow_up": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/P_GTDDate"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "by": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "hermes",
+                    "user"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "anyOf": [
+            {
+              "required": [
+                "title"
+              ],
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096,
+                  "pattern": "\\S",
+                  "x-max-utf8-bytes": 4096
+                }
+              }
+            },
+            {
+              "required": [
+                "list"
+              ],
+              "properties": {
+                "list": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "\\S"
+                }
+              }
+            },
+            {
+              "required": [
+                "due"
+              ],
+              "properties": {
+                "due": {
+                  "$ref": "#/$defs/P_GTDDate"
+                }
+              }
+            },
+            {
+              "required": [
+                "waiting_for"
+              ],
+              "properties": {
+                "waiting_for": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "\\S"
+                }
+              }
+            },
+            {
+              "required": [
+                "follow_up"
+              ],
+              "properties": {
+                "follow_up": {
+                  "$ref": "#/$defs/P_GTDDate"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "item"
+          ],
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "delete"
+            },
+            "item": {
+              "$ref": "#/$defs/P_ItemID"
+            },
+            "by": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "hermes",
+                    "user"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "item",
+            "start",
+            "minutes",
+            "calendar"
+          ],
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "to_event"
+            },
+            "item": {
+              "$ref": "#/$defs/P_ItemID"
+            },
+            "start": {
+              "$ref": "#/$defs/P_ISODateTime"
+            },
+            "minutes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10080,
+              "description": "持续分钟数，最多 7 天。"
+            },
+            "calendar": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "\\S"
+            },
+            "by": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "hermes",
+                    "user"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "item",
+            "into"
+          ],
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "merge"
+            },
+            "item": {
+              "$ref": "#/$defs/P_ItemID"
+            },
+            "into": {
+              "$ref": "#/$defs/P_ItemID"
+            },
+            "title": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096,
+                  "pattern": "\\S",
+                  "x-max-utf8-bytes": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "by": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "hermes",
+                    "user"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "item",
+            "start"
+          ],
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "update_event"
+            },
+            "item": {
+              "$ref": "#/$defs/P_ItemID"
+            },
+            "start": {
+              "$ref": "#/$defs/P_ISODateTime"
+            },
+            "minutes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10080,
+                  "description": "持续分钟数，最多 7 天。"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "by": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "hermes",
+                    "user"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "title",
+            "list"
+          ],
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "create_reminder"
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "\\S",
+              "x-max-utf8-bytes": 4096
+            },
+            "list": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "\\S"
+            },
+            "due": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/P_GTDDate"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "alarm": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/P_GTDDate"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "by": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "hermes",
+                    "user"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "discriminator": {
+        "propertyName": "op"
+      },
+      "description": "6 种操作，拒绝无关字段；可选字段省略/null 都表示不改，不支持用 null 清空（兼容 Core Optional）。update 至少一个非 null 改动；merge 的 item≠into 由业务校验。create 的省略/null 在幂等指纹中等价。"
+    },
+    "P_GTDDate": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/P_ISODate"
+        },
+        {
+          "$ref": "#/$defs/P_ISODateTime"
+        }
+      ],
+      "description": "ISO 日期或带时区的 ISO 时间；沿用 Core 的 String，不接收 Unix 数字。"
+    },
+    "P_GTDSuggestion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action",
+        "title"
+      ],
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "do",
+            "delete",
+            "someday"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "\\S",
+          "x-max-utf8-bytes": 4096
+        },
+        "destination": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "工作",
+                "生活",
+                "家庭",
+                "等待",
+                "日历"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "due": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/P_GTDDate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "waiting_for": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "\\S"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "follow_up": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/P_GTDDate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "event": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/P_GTDEventSuggestion"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "merge_into": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/P_ItemID"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "description": "沿用 GTDSuggestion 字段；只作为待确认答案，不能触发工具或扩大报告允许的目标。"
+    },
+    "P_GTDEventSuggestion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start",
+        "minutes",
+        "calendar"
+      ],
+      "properties": {
+        "start": {
+          "$ref": "#/$defs/P_ISODateTime"
+        },
+        "minutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10080,
+          "description": "持续分钟数，1–10080（最多 7 天）。"
+        },
+        "calendar": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "\\S"
+        }
+      }
+    },
+    "P_GTDChoices": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "titles": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096,
+                "pattern": "\\S",
+                "x-max-utf8-bytes": 4096
+              },
+              "minItems": 0,
+              "maxItems": 20
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "people": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "\\S"
+              },
+              "minItems": 0,
+              "maxItems": 20
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dates": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/P_ISODate"
+              },
+              "minItems": 0,
+              "maxItems": 20
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "arrangements": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/P_GTDArrangement"
+              },
+              "minItems": 0,
+              "maxItems": 20
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "extras": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/P_GTDExtra"
+              },
+              "minItems": 0,
+              "maxItems": 20
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "P_GTDArrangement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "label",
+        "changes"
+      ],
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P_GTDChange"
+          },
+          "minItems": 1,
+          "maxItems": 100
+        }
+      }
+    },
+    "P_GTDExtra": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "label",
+        "change"
+      ],
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        },
+        "change": {
+          "$ref": "#/$defs/P_GTDChange"
+        }
+      }
+    },
+    "P_GTDAgenda": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "date",
+        "events",
+        "due",
+        "focus",
+        "focus_limit",
+        "inbox_pending"
+      ],
+      "properties": {
+        "date": {
+          "$ref": "#/$defs/P_ISODate"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P_GTDAgendaEvent"
+          },
+          "minItems": 0,
+          "maxItems": 100
+        },
+        "due": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P_GTDAgendaDue"
+          },
+          "minItems": 0,
+          "maxItems": 100
+        },
+        "focus": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P_GTDAgendaFocus"
+          },
+          "minItems": 0,
+          "maxItems": 100
+        },
+        "focus_limit": {
+          "type": "integer",
+          "enum": [
+            2,
+            3
+          ],
+          "description": "工作日 3、周末 2；不是持续时间。"
+        },
+        "inbox_pending": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        }
+      },
+      "description": "所有 focus ID 唯一，预选数 ≤ focus_limit；counts 与读取时的数据一致，均由业务验证。"
+    },
+    "P_GTDAgendaEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "start",
+        "end",
+        "calendar"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/P_ItemID"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "\\S",
+          "x-max-utf8-bytes": 4096
+        },
+        "start": {
+          "$ref": "#/$defs/P_ISODateTime"
+        },
+        "end": {
+          "$ref": "#/$defs/P_ISODateTime"
+        },
+        "calendar": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "\\S"
+        }
+      },
+      "description": "业务校验 end > start；单位均为带时区 ISO 时间。"
+    },
+    "P_GTDAgendaDue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "list",
+        "due",
+        "overdue_days"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/P_ItemID"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "\\S",
+          "x-max-utf8-bytes": 4096
+        },
+        "list": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "\\S"
+        },
+        "due": {
+          "$ref": "#/$defs/P_GTDDate"
+        },
+        "overdue_days": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 365000,
+          "description": "超期天数。"
+        }
+      }
+    },
+    "P_GTDAgendaFocus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "list",
+        "reason",
+        "preselected"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/P_ItemID"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "\\S",
+          "x-max-utf8-bytes": 4096
+        },
+        "list": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "\\S"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1024
+        },
+        "preselected": {
+          "type": "boolean"
+        }
+      }
+    },
+    "P_GTDOriginals": {
+      "type": "object",
+      "maxProperties": 500,
+      "propertyNames": {
+        "$ref": "#/$defs/P_ItemID"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/P_GTDOriginal"
+      },
+      "description": "稳定事项 ID → 生成时原值，最多 500 项；只允许报告明确引用的目标。内部完整保留，App 可省略 originals；缺原值的已有事项变更 skipped。"
+    },
+    "P_GTDOriginal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "title",
+        "list",
+        "due",
+        "completed",
+        "modified_at"
+      ],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": [
+            "reminder",
+            "event"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "\\S",
+          "x-max-utf8-bytes": 4096,
+          "description": "同次采集的完整原始标题，最多 4096 UTF-8 字节；必须无损保留，不截断、不摘要、不做 Unicode 归一化以迁就校验。"
+        },
+        "list": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "\\S"
+        },
+        "due": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/P_GTDDate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "completed": {
+          "type": "boolean"
+        },
+        "modified_at": {
+          "$ref": "#/$defs/P_ISODateTime"
+        },
+        "start": {
+          "$ref": "#/$defs/P_ISODateTime"
+        },
+        "end": {
+          "$ref": "#/$defs/P_ISODateTime"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "const": "event"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "start",
+              "end"
+            ]
+          },
+          "else": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "start"
+                  ]
+                },
+                {
+                  "required": [
+                    "end"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "description": "同一次报告采集中取得的原值，不能在投递/确认时补采；modified_at 来自 Apple 读取，不能用 generated_at 代替。 title 与事项原值逐字一致；不能因标题超过旧的 512 字符而省略 originals 或替换为显示摘要。"
+    },
+    "B_BridgeReportPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reports",
+        "has_more"
+      ],
+      "properties": {
+        "reports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/B_BridgeReport"
+          },
+          "minItems": 0,
+          "maxItems": 100
+        },
+        "has_more": {
+          "type": "boolean"
+        }
+      },
+      "description": "sequence 降序；使用最后一项序号作为 before_sequence，最多 100 条；不重跑 GTD。"
+    },
+    "B_BridgeContextReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "sequence",
+        "title",
+        "body",
+        "truncated"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/B_UUID"
+        },
+        "sequence": {
+          "$ref": "#/$defs/B_Sequence"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        },
+        "body": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 24000
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "description": "最近 6 份以内；超长正文置引用占位，整组 body 总计 ≤24000 Unicode 字符。"
+    },
+    "B_BridgeLocationContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorized_devices",
+        "shared_point"
+      ],
+      "properties": {
+        "authorized_devices": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "shared_point": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/B_LocationPoint"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "authorized_devices": {
+                "minimum": 1
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "shared_point": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ],
+      "description": "有持久授权只声明定位工具可用，不提前注入坐标；无持久授权时可注入有效限时共享点。"
+    },
+    "B_LocationPoint": {
+      "$ref": "#/$defs/P_LocationPoint"
+    },
+    "P_LocationPoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "latitude",
+        "longitude",
+        "accuracy",
+        "timestamp"
+      ],
+      "properties": {
+        "latitude": {
+          "type": "number",
+          "minimum": -90,
+          "maximum": 90,
+          "description": "WGS84 纬度，度。"
+        },
+        "longitude": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180,
+          "description": "WGS84 经度，度。"
+        },
+        "accuracy": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000,
+          "description": "水平精度，米。"
+        },
+        "timestamp": {
+          "$ref": "#/$defs/P_UnixSeconds"
+        }
+      },
+      "description": "所有数字必须有限；采样时间最多未来 10 秒，读取/回传时按 max_age_seconds 重校验（绝对上限 120 秒）。"
+    },
+    "B_BridgeContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reports",
+        "location"
+      ],
+      "properties": {
+        "reports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/B_BridgeContextReport"
+          },
+          "minItems": 0,
+          "maxItems": 6
+        },
+        "location": {
+          "$ref": "#/$defs/B_BridgeLocationContext"
+        }
+      },
+      "description": "pre_llm_call 只在可信 Ollo 会话/压缩续接注入；其他渠道、reset/分支/委派拒绝。上下文失败可继续普通聊天，报告交付失败不能假成功。"
+    },
+    "B_BridgeLocationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "max_age_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 120,
+          "default": 120,
+          "description": "秒，0 要求点的 timestamp≥requested_at。"
+        },
+        "timeout_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 15,
+          "default": 15,
+          "description": "等待秒数，包含 HTTP/轮询；合并或重试不延长。"
+        },
+        "runtime_call_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "\\S"
+        }
+      },
+      "description": "runtime_call_id 仅由宿主 task/tool-call 元数据构造，不能从模型参数取得；同设备/grant/binding/max_age 等价 pending 合并。"
+    },
+    "B_BridgeLocationPending": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "id",
+        "requested_at",
+        "expires_at",
+        "max_age_seconds"
+      ],
+      "properties": {
+        "status": {
+          "const": "pending"
+        },
+        "id": {
+          "$ref": "#/$defs/B_UUID"
+        },
+        "requested_at": {
+          "$ref": "#/$defs/B_UnixSeconds"
+        },
+        "expires_at": {
+          "$ref": "#/$defs/B_UnixSeconds"
+        },
+        "max_age_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 120,
+          "description": "最大可接受采样年龄，秒；0 要求采样时间 ≥ requested_at。"
+        }
+      },
+      "description": "0 < expires_at-requested_at ≤ 15 秒；请求合并/重启不得延长 TTL；到期 1 小时后删除短回执。"
+    },
+    "B_UnixSeconds": {
+      "$ref": "#/$defs/P_UnixSeconds"
+    },
+    "B_BridgeLocationSuccess": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "device_id",
+        "device_name",
+        "platform",
+        "coordinate_system",
+        "point",
+        "age_seconds",
+        "cached"
+      ],
+      "properties": {
+        "status": {
+          "const": "ok"
+        },
+        "device_id": {
+          "$ref": "#/$defs/B_UUID"
+        },
+        "device_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "\\S"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "iOS",
+            "iPadOS",
+            "macOS",
+            "watchOS"
+          ]
+        },
+        "coordinate_system": {
+          "const": "WGS84"
+        },
+        "point": {
+          "$ref": "#/$defs/B_LocationPoint"
+        },
+        "age_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 120,
+          "description": "结果读取时采样年龄，秒；仍须满足原请求 max_age_seconds。"
+        },
+        "cached": {
+          "type": "boolean"
+        }
+      }
+    },
+    "B_BridgeLocationUnavailable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "not_authorized",
+            "device_selection_required",
+            "permission_denied",
+            "location_disabled",
+            "timeout",
+            "background_unavailable",
+            "unavailable",
+            "cancelled"
+          ]
+        }
+      },
+      "description": "定位优先唯一 iPhone，无 iPhone 才唯一 Watch；多候选明确要求选择，iPad/Mac 不自动代表用户。"
+    },
+    "B_BridgeLocationResult": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/B_BridgeLocationPending"
+        },
+        {
+          "$ref": "#/$defs/B_BridgeLocationSuccess"
+        },
+        {
+          "$ref": "#/$defs/B_BridgeLocationUnavailable"
+        }
+      ]
+    },
+    "B_BridgeLocationImmediate": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/B_BridgeLocationSuccess"
+        },
+        {
+          "$ref": "#/$defs/B_BridgeLocationUnavailable"
+        }
+      ]
+    },
+    "B_BridgeWakeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operation_id",
+        "request"
+      ],
+      "properties": {
+        "operation_id": {
+          "$ref": "#/$defs/B_UUID"
+        },
+        "request": {
+          "$ref": "#/$defs/B_ScheduleWakeRequest"
+        }
+      },
+      "description": "只触发配置的今日安排任务。operation_id 是网关持久 trigger ID；锁内确认未暂停后幂等入队，不用裸 trigger_job 恢复已暂停任务。入队不确定先核对宿主记录，不能换 ID 再触发。"
+    },
+    "B_ScheduleWakeRequest": {
+      "$ref": "#/$defs/P_ScheduleWakeRequest"
+    },
+    "P_ScheduleWakeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "device_id",
+        "local_date",
+        "source"
+      ],
+      "properties": {
+        "request_id": {
+          "$ref": "#/$defs/P_UUID"
+        },
+        "device_id": {
+          "$ref": "#/$defs/P_UUID"
+        },
+        "local_date": {
+          "$ref": "#/$defs/P_ISODate"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "focus_filter",
+            "shortcut"
+          ]
+        }
+      },
+      "description": "Asia/Shanghai；当日 wake 跨 UUID/设备合并。旧日期拒绝，不补昨天；device_id 不是去重键。"
+    },
+    "B_BridgeCaptureRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operation_id",
+        "request"
+      ],
+      "properties": {
+        "operation_id": {
+          "$ref": "#/$defs/B_UUID"
+        },
+        "request": {
+          "$ref": "#/$defs/B_ScheduleCaptureRequest"
+        }
+      },
+      "description": "领取原子执行许可后调用确定性 Apple helper；以 claim 返回的授权载荷为准，不能改字段；不调用模型。创建时 URL 固定为 ollo://capture/<request_id>，包括核对 absent 后领取新 attempt 的创建。"
+    },
+    "B_ScheduleCaptureRequest": {
+      "$ref": "#/$defs/P_ScheduleCaptureRequest"
+    },
+    "P_ScheduleCaptureRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "text",
+        "created_at",
+        "source"
+      ],
+      "properties": {
+        "request_id": {
+          "$ref": "#/$defs/P_UUID"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "\\S",
+          "x-max-utf8-bytes": 4096,
+          "description": "原文写入提醒事项「收件箱」；最多 4096 UTF-8 字节，不调用模型。"
+        },
+        "created_at": {
+          "$ref": "#/$defs/P_ISODateTime"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "\\S"
+        }
+      },
+      "description": "App 先落持久队列；同 request_id 必须保留原 text/created_at/source。成功回执长期保留，不因短 TTL 删除；同 ID 异内容 409。"
+    },
+    "B_BridgeCaptureLookupRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operation_id",
+        "request_id",
+        "attempt"
+      ],
+      "properties": {
+        "operation_id": {
+          "$ref": "#/$defs/B_UUID"
+        },
+        "request_id": {
+          "$ref": "#/$defs/B_UUID",
+          "description": "必须匹配 operation 的不可变 capture 请求；用于精确匹配提醒 URL。"
+        },
+        "attempt": {
+          "$ref": "#/$defs/B_UUID",
+          "description": "当前许可的 attempt_id（UUID）；沿用设计中的 attempt 字段名，不是计数。旧 attempt 不得核对或覆盖新状态。"
+        }
+      },
+      "description": "仅用于 unknown capture；网关校验三者绑定，并保证该 attempt 的许可过期满 30 秒后才请求。helper 自带从启动起最多 7 秒退出的硬时限；bridge 不保存执行记录，只在内存仍有同一 request_id 的活动 helper 时返回 unavailable/in_progress，否则直接查询。"
+    },
+    "B_BridgeCaptureLookupResponse": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "item_id"
+          ],
+          "properties": {
+            "status": {
+              "const": "found"
+            },
+            "item_id": {
+              "$ref": "#/$defs/B_ItemID"
+            }
+          },
+          "description": "精确 URL 唯一匹配的提醒；以 item_id 完成操作，业务 done 对应现有回执 succeeded。"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "checked_at"
+          ],
+          "properties": {
+            "status": {
+              "const": "absent"
+            },
+            "checked_at": {
+              "$ref": "#/$defs/B_ISODateTime",
+              "description": "完整访问权限下全部提醒清单查询完成的时间；带时区 ISO 8601 时间，不是 Unix 秒。"
+            }
+          },
+          "description": "全部清单（含已完成事项）查询完成且无 URL 匹配，才允许 unknown → failed_not_executed；后续同请求写入须领取新 attempt。"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "reason"
+          ],
+          "properties": {
+            "status": {
+              "const": "unavailable"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "pattern": "\\S",
+              "description": "同一 request_id 在 bridge 内存登记中仍有活动 helper 时固定为 in_progress；其余情况沿用脱敏原因字符串，不含个人事项、凭据或命令。权限不足或查询未完整完成时也必须使用 unavailable 分支。"
+            }
+          },
+          "description": "无法得出可信核对结论；保持 unknown，60 秒起退避，最长 3600 秒再核对。"
+        }
+      ],
+      "description": "status 区分三种互斥结果；结果仅适用于请求的 operation 与当前 attempt，网关应用前须再次原子校验绑定。"
+    },
+    "B_ItemID": {
+      "$ref": "#/$defs/P_ItemID"
+    },
+    "B_BridgeItemsRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "report_id",
+        "ids"
+      ],
+      "properties": {
+        "report_id": {
+          "$ref": "#/$defs/B_UUID"
+        },
+        "ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/B_ItemID"
+          },
+          "minItems": 1,
+          "maxItems": 100,
+          "uniqueItems": true
+        }
+      },
+      "description": "内部用数组避免二次 CSV 编码；网关已验证报告引用，但 bridge 仍验证 schema/固定绑定。 公共查询仍按编码后 65536 字节分批；内部体积独立上限 655360 字节，含 100 个最多 512 字符的 ID 与 report_id。"
+    },
+    "B_BridgeInterpretRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "item",
+        "allowed_item_ids"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/$defs/B_ScheduleInterpretRequest"
+        },
+        "item": {
+          "$ref": "#/$defs/B_GTDItem"
+        },
+        "allowed_item_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/B_ItemID"
+          },
+          "minItems": 1,
+          "maxItems": 500,
+          "uniqueItems": true
+        }
+      },
+      "description": "item 来自网关持久报告，必须等于 request.item_id；allowed_item_ids 为允许的关联目标。模型工具全部禁用，不写对话或记忆，输出须再校验。 request 仍受公共 16384 字节原始 JSON 限制；补入 item 和最多 500 个关联 ID 后，内部请求上限 4194304 字节（计算见接口 description）。item 必须是保存的原报告子树，不额外扩充；网关使用紧凑 JSON 转发。"
+    },
+    "B_ScheduleInterpretRequest": {
+      "$ref": "#/$defs/P_ScheduleInterpretRequest"
+    },
+    "P_ScheduleInterpretRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "report_id",
+        "item_id",
+        "text"
+      ],
+      "properties": {
+        "report_id": {
+          "$ref": "#/$defs/P_UUID"
+        },
+        "item_id": {
+          "$ref": "#/$defs/P_ItemID"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "\\S",
+          "x-max-utf8-bytes": 4096
+        },
+        "current_suggestion": {
+          "$ref": "#/$defs/P_GTDSuggestion"
+        }
+      },
+      "description": "带当前答案避免丢失编辑；模型仅返回建议，不能改变 report/item 范围。"
+    },
+    "B_GTDItem": {
+      "$ref": "#/$defs/P_GTDItem"
+    },
+    "B_BridgeRuntime": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source",
+            "operation_id"
+          ],
+          "properties": {
+            "source": {
+              "const": "api"
+            },
+            "operation_id": {
+              "$ref": "#/$defs/B_UUID"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source",
+            "session_id",
+            "task_id",
+            "tool_call_id"
+          ],
+          "properties": {
+            "source": {
+              "const": "tool"
+            },
+            "session_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "\\S"
+            },
+            "task_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "\\S"
+            },
+            "tool_call_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "\\S"
+            }
+          }
+        }
+      ],
+      "description": "api 身份由已认证 bridge HTTP handler 生成；tool 身份由宿主注入，不接受模型自报。网关映射到可信 run/confirmation，不能按最近确认猜测。"
+    },
+    "B_BridgeOperationClaim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claim_id",
+        "runtime"
+      ],
+      "properties": {
+        "claim_id": {
+          "$ref": "#/$defs/B_UUID"
+        },
+        "runtime": {
+          "$ref": "#/$defs/B_BridgeRuntime"
+        }
+      },
+      "description": "claim_id 每次领取固定；只有首次成功领取可执行，重复 claim 仅返回观察状态、不再次发许可。失联或 unknown 不因超时释放，确定未执行才允许原操作再次领取。capture 经 lookup 得到 absent 后转 failed_not_executed，可用新 claim_id 为同一 request_id 领取新 attempt_id；旧 attempt 的回执或核对结果不得覆盖新状态。"
+    },
+    "B_BridgeConfirmationGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operation_id",
+        "indices",
+        "changes"
+      ],
+      "properties": {
+        "operation_id": {
+          "$ref": "#/$defs/B_UUID"
+        },
+        "indices": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 99
+          },
+          "minItems": 1,
+          "maxItems": 100,
+          "uniqueItems": true
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/B_GTDConfirmedChange"
+          },
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "description": "indices 与 changes 一一对应原确认，保留组内顺序；共享 item/into 形成连通依赖组，整组原值核对后暂存并一次 commit。"
+    },
+    "B_GTDConfirmedChange": {
+      "$ref": "#/$defs/P_GTDConfirmedChange"
+    },
+    "P_GTDConfirmedChange": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/P_GTDChange"
+        },
+        {
+          "type": "object",
+          "required": [
+            "by"
+          ],
+          "properties": {
+            "by": {
+              "type": "string",
+              "enum": [
+                "hermes",
+                "user"
+              ]
+            }
+          }
+        }
+      ],
+      "description": "只有确认中的改动要求 by；建议中的 Change 不要求。by 不参与业务去重。"
+    },
+    "B_BridgeConfirmation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "confirmation_id",
+        "run_id",
+        "confirmation",
+        "originals",
+        "allowed_item_ids",
+        "groups"
+      ],
+      "properties": {
+        "confirmation_id": {
+          "$ref": "#/$defs/B_UUID"
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        },
+        "confirmation": {
+          "$ref": "#/$defs/B_GTDConfirmation"
+        },
+        "originals": {
+          "$ref": "#/$defs/B_GTDOriginals"
+        },
+        "allowed_item_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/B_ItemID"
+          },
+          "minItems": 0,
+          "maxItems": 500,
+          "uniqueItems": true
+        },
+        "groups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/B_BridgeConfirmationGroup"
+          },
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "description": "可信当前 run 专属，不能按 UUID 领取其他会话确认；网关保存的不可变 payload 是唯一授权来源。模型只能调用 execute_gtd_confirmation(ID)，不得另传 changes。"
+    },
+    "B_GTDConfirmation": {
+      "$ref": "#/$defs/P_GTDConfirmation"
+    },
+    "P_GTDConfirmation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "report_id",
+        "kind",
+        "changes"
+      ],
+      "properties": {
+        "version": {
+          "type": "integer",
+          "const": 1
+        },
+        "report_id": {
+          "$ref": "#/$defs/P_UUID"
+        },
+        "kind": {
+          "$ref": "#/$defs/P_GTDKind"
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P_GTDConfirmedChange"
+          },
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "description": "hermes-plus-gtd-confirm：用户仅授权此报告列明的改动，最多 100 项；item/into 必须属于报告允许引用集。按报告+依赖组规范操作持久去重，排除 by/组外排序。"
+    },
+    "B_GTDOriginals": {
+      "$ref": "#/$defs/P_GTDOriginals"
+    },
+    "B_BridgeCapturePermit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "request"
+      ],
+      "properties": {
+        "kind": {
+          "const": "capture"
+        },
+        "request": {
+          "$ref": "#/$defs/B_ScheduleCaptureRequest"
+        }
+      }
+    },
+    "B_BridgeGroupPermit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "confirmation_id",
+        "report_id",
+        "group",
+        "originals"
+      ],
+      "properties": {
+        "kind": {
+          "const": "gtd_group"
+        },
+        "confirmation_id": {
+          "$ref": "#/$defs/B_UUID"
+        },
+        "report_id": {
+          "$ref": "#/$defs/B_UUID"
+        },
+        "group": {
+          "$ref": "#/$defs/B_BridgeConfirmationGroup"
+        },
+        "originals": {
+          "$ref": "#/$defs/B_GTDOriginals"
+        }
+      }
+    },
+    "B_BridgeOperationPermit": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/B_BridgeCapturePermit"
+        },
+        {
+          "$ref": "#/$defs/B_BridgeGroupPermit"
+        }
+      ]
+    },
+    "B_BridgeOperationOutcome": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "status",
+            "item_id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "capture"
+            },
+            "status": {
+              "const": "succeeded"
+            },
+            "item_id": {
+              "$ref": "#/$defs/B_ItemID"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "status",
+            "results"
+          ],
+          "properties": {
+            "kind": {
+              "const": "gtd_group"
+            },
+            "status": {
+              "const": "succeeded"
+            },
+            "results": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/B_GTDResultEntry"
+              },
+              "minItems": 1,
+              "maxItems": 100
+            }
+          },
+          "description": "整组执行已得到确定回执，可含 done/skipped/failed，索引与领取的组精确匹配。"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "status",
+            "reason",
+            "retryable"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "capture",
+                "gtd_group"
+              ]
+            },
+            "status": {
+              "const": "failed_not_executed"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "pattern": "\\S"
+            },
+            "retryable": {
+              "const": true
+            }
+          },
+          "description": "能证明 helper 未启动或 commit 前明确拒绝时使用；capture 也允许由网关保证许可过期满 30 秒后，以完整 lookup 的 absent 将 unknown 转为此状态，helper 的 7 秒硬时限保证旧写入结束，无需 bridge 保存执行记录或确认进程已结束。此例外不适用于 gtd_group。"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "status",
+            "reason",
+            "retryable"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "capture",
+                "gtd_group"
+              ]
+            },
+            "status": {
+              "const": "unknown"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "pattern": "\\S"
+            },
+            "retryable": {
+              "const": false
+            }
+          },
+          "description": "已尝试 commit/管道超时/写入后落回执前崩溃；必须保留领取状态，禁止盲重试。capture 由 lookup 自动核对：found → done（成功回执 succeeded）、absent → failed_not_executed、unavailable 保持 unknown；retryable=false 不禁止客户端用原 request_id 定期重提以查询核对进度。"
+        }
+      ]
+    },
+    "B_GTDResultEntry": {
+      "$ref": "#/$defs/P_GTDResultEntry"
+    },
+    "P_GTDResultEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "status"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 99,
+          "description": "确认 changes 的 0 基索引，必须小于对应确认项数。"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "done",
+            "skipped",
+            "failed"
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "pattern": "\\S"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "skipped",
+                  "failed"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "reason"
+            ],
+            "properties": {
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024,
+                "pattern": "\\S"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "B_BridgeOperationClaimed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "attempt_id",
+        "operation"
+      ],
+      "properties": {
+        "status": {
+          "const": "claimed"
+        },
+        "attempt_id": {
+          "$ref": "#/$defs/B_UUID"
+        },
+        "operation": {
+          "$ref": "#/$defs/B_BridgeOperationPermit"
+        }
+      },
+      "description": "首次领取的唯一执行许可；重复 claim 不返回此状态。capture/组操作由网关生成，handler 不得用调用方副本替换。 capture 执行许可为 8 秒；写入 helper 独立硬时限为 7 秒，核对仍由网关在许可过期后再等 30 秒才发起。"
+    },
+    "B_BridgeOperationObserved": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "outcome"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "executing",
+            "succeeded",
+            "failed_not_executed",
+            "unknown"
+          ]
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/B_BridgeOperationOutcome"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "executing"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "outcome": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "outcome": {
+                "$ref": "#/$defs/B_BridgeOperationOutcome"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "succeeded"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "outcome": {
+                "properties": {
+                  "status": {
+                    "const": "succeeded"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "failed_not_executed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "outcome": {
+                "properties": {
+                  "status": {
+                    "const": "failed_not_executed"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "unknown"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "outcome": {
+                "properties": {
+                  "status": {
+                    "const": "unknown"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "description": "没有执行许可，禁止重跑；只有 executing 可 outcome=null，其他必须附匹配终态，跨字段由业务验证。"
+    },
+    "B_BridgeOperationClaimResponse": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/B_BridgeOperationClaimed"
+        },
+        {
+          "$ref": "#/$defs/B_BridgeOperationObserved"
+        }
+      ]
+    },
+    "B_BridgeOperationFinish": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt_id",
+        "runtime",
+        "outcome"
+      ],
+      "properties": {
+        "attempt_id": {
+          "$ref": "#/$defs/B_UUID"
+        },
+        "runtime": {
+          "$ref": "#/$defs/B_BridgeRuntime"
+        },
+        "outcome": {
+          "$ref": "#/$defs/B_BridgeOperationOutcome"
+        }
+      },
+      "description": "operation/attempt/可信 runtime 必须匹配领取；同 outcome 完成回调幂等，冲突 409。未收到完成回执可重传 finish，但不能重跑 Apple 写入。"
+    },
+    "B_BridgeAgendaDay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "business_date",
+        "status",
+        "trigger_id",
+        "report_id",
+        "execution_id"
+      ],
+      "properties": {
+        "business_date": {
+          "$ref": "#/$defs/B_ISODate"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "not_generated",
+            "triggered",
+            "generated"
+          ]
+        },
+        "trigger_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/B_UUID"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "report_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/B_UUID"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "execution_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/B_UUID"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "generated"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "report_id": {
+                "$ref": "#/$defs/B_UUID"
+              },
+              "execution_id": {
+                "$ref": "#/$defs/B_UUID"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "report_id": {
+                "type": "null"
+              },
+              "execution_id": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ],
+      "description": "以入库报告为 generated；仅触发意图不阻止固定兜底。运行前查询是优化，最后投递事务的 binding+日期唯一键才防两份。"
+    },
+    "B_ScheduleItemsResponse": {
+      "$ref": "#/$defs/P_ScheduleItemsResponse"
+    },
+    "P_ScheduleItemsResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P_ScheduleItem"
+          },
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "description": "返回 ID 集合与请求精确一致且不重复；关联目标和 agenda 重点同样核对。公共和内部接口的完整紧凑 UTF-8 JSON 正文（压缩前）均最多 2097152 字节（2 MiB），不做 ASCII 转义；字段标题最多 4096 UTF-8 字节，最多 100 条。\n预算计算及必要 JSON 转义的边界见 GET /v1/schedule/items 的 x-response-size-policy。编码后整包超限用 413/payload_too_large 提示缩小 ID 批次；不得截断标题/原值或返回部分 ID 冒充完整响应。"
+    },
+    "P_ScheduleItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "exists",
+        "completed"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/P_ItemID"
+        },
+        "exists": {
+          "type": "boolean"
+        },
+        "completed": {
+          "type": "boolean"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "\\S",
+              "x-max-utf8-bytes": 4096
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "非 null 时最多 4096 UTF-8 字节，与 capture 原文上限一致；原样返回，不截断。"
+        },
+        "list": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "\\S"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "due": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/P_GTDDate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "modified_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/P_ISODateTime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "description": "仅确实不存在才 exists=false；权限/读取超时返回错误，不能空列表冒充。items 只刷新表单，不替换生成时 originals。"
+    },
+    "B_OperationError": {
+      "$ref": "#/$defs/P_OperationError"
+    },
+    "P_OperationError": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/P_Error"
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "retryable"
+          ],
+          "properties": {
+            "code": {
+              "type": "string",
+              "enum": [
+                "invalid_request",
+                "unauthorized",
+                "forbidden",
+                "not_found",
+                "expired",
+                "request_id_conflict",
+                "operation_in_progress",
+                "write_outcome_unknown",
+                "payload_too_large",
+                "not_configured",
+                "dependency_unavailable",
+                "not_executed",
+                "read_timeout",
+                "interpret_timeout",
+                "invalid_model_output",
+                "run_active",
+                "invalid_confirmation",
+                "stale_execution",
+                "paused_job",
+                "runtime_mismatch"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "enum": [
+                  "invalid_request",
+                  "unauthorized",
+                  "forbidden",
+                  "not_found",
+                  "expired",
+                  "request_id_conflict",
+                  "write_outcome_unknown",
+                  "payload_too_large",
+                  "invalid_confirmation",
+                  "stale_execution",
+                  "paused_job",
+                  "runtime_mismatch",
+                  "not_configured"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "retryable": {
+                "const": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "enum": [
+                  "operation_in_progress",
+                  "not_executed",
+                  "read_timeout",
+                  "interpret_timeout",
+                  "dependency_unavailable",
+                  "invalid_model_output",
+                  "run_active"
+                ]
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "properties": {
+              "retryable": {
+                "const": true
+              }
+            }
+          }
+        }
+      ],
+      "description": "HTTP 400/401/403/404/409/410/413/503/504 的结构化错误；retryable=false 不等于操作已回滚。 code/HTTP/retryable 完整对应见 info.description 的错误码表；read_timeout 与 interpret_timeout 不可互换。",
+      "unevaluatedProperties": false
+    },
+    "P_Error": {
+      "type": "object",
+      "required": [
+        "code"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "稳定错误码；已实现对话错误保持兼容，新增业务错误见 OperationError。"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1024,
+          "description": "脱敏诊断文字，不含凭据、报告正文或位置。"
+        },
+        "retryable": {
+          "type": "boolean",
+          "description": "缺省表示未知，不得据此自动重试写入；新增业务接口必填。true 也必须沿用原幂等 ID/载荷。"
+        }
+      }
+    },
+    "B_ScheduleCaptureResponse": {
+      "$ref": "#/$defs/P_ScheduleCaptureResponse"
+    },
+    "P_ScheduleCaptureResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "item_id"
+      ],
+      "properties": {
+        "item_id": {
+          "$ref": "#/$defs/P_ItemID"
+        }
+      },
+      "description": "只有 Apple 写入成功且持久存妥回执才返回；重试同 ID 返回同 item_id。"
+    },
+    "B_Accepted": {
+      "$ref": "#/$defs/P_Accepted"
+    },
+    "P_Accepted": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "accepted"
+      ],
+      "properties": {
+        "accepted": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    },
+    "B_ScheduleWakeResponse": {
+      "$ref": "#/$defs/P_ScheduleWakeResponse"
+    },
+    "P_ScheduleWakeResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "triggered",
+            "already_generated",
+            "already_triggered"
+          ]
+        }
+      },
+      "description": "triggered=已持久接受既有 cron 的提前触发，不表示报告已生成。generated 只在当天报告入库后成立。兜底仍由 Hermes 负责（工作日 08:00，周末 09:30），当天最多一份报告/推送。"
+    },
+    "B_ScheduleInterpretResponse": {
+      "$ref": "#/$defs/P_ScheduleInterpretResponse"
+    },
+    "P_ScheduleInterpretResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "suggestion"
+      ],
+      "properties": {
+        "suggestion": {
+          "$ref": "#/$defs/P_GTDSuggestion"
+        }
+      },
+      "description": "Hermes 隔离理解调用，禁用工具、不写对话/记忆；超时保留 App 原答案。"
+    },
+    "P_GTDResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "report_id",
+        "results"
+      ],
+      "properties": {
+        "version": {
+          "type": "integer",
+          "const": 1
+        },
+        "report_id": {
+          "$ref": "#/$defs/P_UUID"
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P_GTDResultEntry"
+          },
+          "minItems": 1,
+          "maxItems": 100,
+          "uniqueItems": true
+        }
+      },
+      "description": "hermes-plus-gtd-result：允许 sparse 结果，但 index 必须唯一且在对应 changes 范围内；跨记录约束由业务验证，不能用整对象 uniqueItems 代替。只有真实执行回执可标 done。"
+    }
+  }
+}

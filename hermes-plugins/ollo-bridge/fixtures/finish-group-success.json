@@ -1,0 +1,23 @@
+{
+  "attempt_id": "60000000-0000-4000-8000-000000000002",
+  "runtime": {
+    "source": "tool",
+    "session_id": "fixture-session",
+    "task_id": "fixture-task",
+    "tool_call_id": "fixture-tool"
+  },
+  "outcome": {
+    "kind": "gtd_group",
+    "status": "succeeded",
+    "results": [
+      {
+        "index": 0,
+        "status": "done"
+      },
+      {
+        "index": 1,
+        "status": "done"
+      }
+    ]
+  }
+}

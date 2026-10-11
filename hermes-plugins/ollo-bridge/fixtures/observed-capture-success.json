@@ -1,0 +1,8 @@
+{
+  "status": "succeeded",
+  "outcome": {
+    "kind": "capture",
+    "status": "succeeded",
+    "item_id": "fixture-captured-reminder"
+  }
+}

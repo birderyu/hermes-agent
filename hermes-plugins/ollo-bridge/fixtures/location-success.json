@@ -1,0 +1,15 @@
+{
+  "status": "ok",
+  "device_id": "20000000-0000-4000-8000-000000000001",
+  "device_name": "示例 iPhone",
+  "platform": "iOS",
+  "coordinate_system": "WGS84",
+  "point": {
+    "latitude": 0.0,
+    "longitude": 0.0,
+    "accuracy": 10.0,
+    "timestamp": 1791682200.0
+  },
+  "age_seconds": 0,
+  "cached": true
+}

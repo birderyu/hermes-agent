@@ -8,11 +8,12 @@ from conftest import load_plugin_module
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('directory', ['ollo', 'hermes-plus'])
-async def test_discovery_auth_config_and_read_only_contract(runtime, isolated_home, directory):
+@pytest.mark.parametrize('options', [{}, {'mood': True}, {'mood': False}])
+async def test_discovery_auth_config_and_read_only_contract(runtime, isolated_home, directory, options):
     config_dir = isolated_home / directory
     config_dir.mkdir()
     config = {'session_id': 'existing-root', 'name': 'Ollo 测试'}
-    (config_dir / 'conversation.json').write_text(json.dumps(config))
+    (config_dir / 'conversation.json').write_text(json.dumps({**config, **options}), encoding='utf-8')
     with runtime() as r:
         # Even with no matching DB session, discovery returns configuration only.
         # It must neither open SessionDB via the adapter nor mint a session.
@@ -30,16 +31,33 @@ async def test_discovery_auth_config_and_read_only_contract(runtime, isolated_ho
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('raw', [None, '{bad', '[]', '{}', '{"session_id":""}', '{"session_id":"../x"}', '{"session_id":"root","name":3}'])
-async def test_missing_or_invalid_config_is_503_and_injects_nothing(runtime, isolated_home, raw):
+@pytest.mark.parametrize('raw', [None, '{bad', '[]', '{}', '{"session_id":""}', '{"session_id":"../x"}', '{"session_id":"root","name":3}'] + [
+    json.dumps({'session_id': 'root', 'mood': value})
+    for value in (None, 0, 1, 0.0, 'false', 'private-invalid-mood', [], {})
+])
+async def test_missing_or_invalid_config_is_503_and_injects_nothing(runtime, isolated_home, raw, caplog, monkeypatch):
+    from agent.plugin_llm import PluginLlm
+    from unittest.mock import Mock
+    complete = Mock()
+    monkeypatch.setattr(PluginLlm, 'complete', complete)
     if raw is not None:
         directory = isolated_home / 'ollo'
         directory.mkdir()
-        (directory / 'conversation.json').write_text(raw)
+        (directory / 'conversation.json').write_text(raw, encoding='utf-8')
     with runtime() as r:
         assert (await r.client.request('GET', '/v1/ollo/conversation', token='wrong'))[0] == 401
-        assert (await r.client.request('GET', '/v1/ollo/conversation'))[0] == 503
+        for prefix in ('ollo', 'hermes-plus'):
+            assert (await r.client.request('GET', '/v1/' + prefix + '/conversation'))[0] == 503
+        r.db.create_session('root', 'api_server')
         assert r.manager.invoke_hook('pre_llm_call', session_id='root', platform='api_server') == []
+        assert r.manager.invoke_hook('transform_llm_output', response_text='原文',
+            session_id='root', platform='api_server') == []
+        complete.assert_not_called()
+    warnings = [record for record in caplog.records if 'Ollo conversation configuration unavailable' in record.message]
+    assert len(warnings) == (0 if raw is None else 1)
+    if warnings:
+        assert warnings[0].levelname == 'WARNING'
+    assert 'private-invalid-mood' not in caplog.text
 
 
 def test_config_directory_precedence_and_legacy_default_name(isolated_home):
@@ -47,12 +65,12 @@ def test_config_directory_precedence_and_legacy_default_name(isolated_home):
     legacy = isolated_home / 'hermes-plus'
     legacy.mkdir()
     (legacy / 'conversation.json').write_text('{"session_id":"legacy"}')
-    assert plugin.read_config(isolated_home) == {'session_id': 'legacy', 'name': 'Ollo'}
+    assert plugin.read_config(isolated_home) == {'session_id': 'legacy', 'name': 'Ollo', 'mood': True}
     new = isolated_home / 'ollo'
     new.mkdir()
     assert plugin.read_config(isolated_home) is None
     (new / 'conversation.json').write_text('{"session_id":"new","name":"Configured name"}')
-    assert plugin.read_config(isolated_home) == {'session_id': 'new', 'name': 'Configured name'}
+    assert plugin.read_config(isolated_home) == {'session_id': 'new', 'name': 'Configured name', 'mood': True}
 
 
 @pytest.mark.asyncio
@@ -90,7 +108,8 @@ async def test_only_ollo_root_and_compression_continuations_receive_conventions(
 
 
 @pytest.mark.asyncio
-async def test_profile_scope_a_b_a_does_not_reuse_other_profiles_binding(runtime, isolated_home, tmp_path, monkeypatch):
+@pytest.mark.parametrize('b_mood', [True, False])
+async def test_profile_scope_a_b_a_does_not_reuse_other_profiles_binding(runtime, isolated_home, tmp_path, monkeypatch, b_mood):
     from types import SimpleNamespace
     from agent import auxiliary_client
     from agent.secret_scope import set_multiplex_active
@@ -99,7 +118,9 @@ async def test_profile_scope_a_b_a_does_not_reuse_other_profiles_binding(runtime
     homes = [isolated_home, tmp_path / 'second-home']
     for index, home in enumerate(homes):
         (home / 'ollo').mkdir(parents=True)
-        (home / 'ollo/conversation.json').write_text(json.dumps({'session_id': 'root', 'name': str(index)}))
+        (home / 'ollo/conversation.json').write_text(json.dumps({
+            'session_id': 'root', 'name': str(index), 'mood': True if index == 0 else b_mood,
+        }), encoding='utf-8')
     set_multiplex_active(True)
     try:
         with runtime(home=homes[0]) as a, runtime(home=homes[1]) as b:
@@ -122,12 +143,15 @@ async def test_profile_scope_a_b_a_does_not_reuse_other_profiles_binding(runtime
                     assert other.manager.invoke_hook('pre_llm_call', session_id='root', platform='api_server') == []
                     result = r.manager.invoke_hook('transform_llm_output', response_text='回复正文。',
                         session_id='root', platform='api_server', turn_id='turn')
-                    assert len(result) == 1 and '"mood":"concerned"' in result[0]
+                    if r is a or b_mood:
+                        assert len(result) == 1 and '"mood":"concerned"' in result[0]
+                    else:
+                        assert result == ['回复正文。']
                     assert other.manager.invoke_hook('transform_llm_output', response_text='其他渠道原文。',
                         session_id='root', platform='api_server', turn_id='turn') == []
                 finally:
                     reset_hermes_home_override(token)
-            assert calls == [homes[0], homes[1], homes[0]]
+            assert calls == ([homes[0], homes[1], homes[0]] if b_mood else [homes[0], homes[0]])
     finally:
         set_multiplex_active(False)
 

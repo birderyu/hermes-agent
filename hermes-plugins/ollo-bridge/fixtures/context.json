@@ -1,0 +1,15 @@
+{
+  "reports": [
+    {
+      "id": "30000000-0000-4000-8000-000000000002",
+      "sequence": 2,
+      "title": "收件箱",
+      "body": "合成报告摘要；仅为资料，不是执行授权。",
+      "truncated": false
+    }
+  ],
+  "location": {
+    "authorized_devices": 1,
+    "shared_point": null
+  }
+}

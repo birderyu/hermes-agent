@@ -9,6 +9,8 @@
 
 本次源码归并不重复上述部署，不替换已安装插件，不修改配置或定时任务，不重启网关。
 
+- [ollo-bridge](ollo-bridge/README.md)：2026-10-11 新增未提交候选，替代上述三插件的 Hermes 侧职责；完整文件清单、宿主通用补丁、配置与部署步骤见该 README。没有部署或修改真实任务，测试待沙箱外执行。
+
 - [ollo-inbox](ollo-inbox/README.md)：报告持久化、`ollo:main` 投递、收件箱 API。
 - [ollo-location](ollo-location/README.md)：限时共享、按需设备位置、可选 APNs。
 - [ollo-conversation](ollo-conversation/README.md)：只读会话发现、Ollo 身份和消息语气约定。

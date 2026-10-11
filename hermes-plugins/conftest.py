@@ -14,6 +14,16 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT.parent))
 
 
+@pytest.hookimpl(tryfirst=True)
+def pytest_collect_directory(path, parent):
+    # Package.setup imports __init__.py before fixtures; this hyphenated
+    # directory cannot supply the package context its relative imports need.
+    # The runtime fixture below loads it as a package through PluginManager.
+    if path == ROOT / 'ollo-bridge':
+        return pytest.Dir.from_parent(parent, path=path)
+    return None
+
+
 def load_plugin_module(kind, filename='__init__.py'):
     path = ROOT / ('ollo-' + kind) / filename
     spec = importlib.util.spec_from_file_location('ollo_test_' + kind + '_' + path.stem, path)
@@ -44,10 +54,10 @@ class RouterClient:
         self.app = app
         app.freeze()
 
-    async def request(self, method, path, *, token='isolated-owner-key', body=None):
+    async def request(self, method, path, *, token='isolated-owner-key', body=None, headers=None):
         from aiohttp import StreamReader
         from aiohttp.test_utils import make_mocked_request
-        headers = {'Authorization': 'Bearer ' + token} if token is not None else {}
+        headers = {**({'Authorization': 'Bearer ' + token} if token is not None else {}), **(headers or {})}
         raw = json.dumps(body).encode() if body is not None else b''
         if body is not None:
             headers.update({'Content-Type': 'application/json', 'Content-Length': str(len(raw))})
@@ -62,7 +72,7 @@ class RouterClient:
 @pytest.fixture
 def runtime(isolated_home, tmp_path):
     @contextmanager
-    def start(names=('conversation',), *, home=None):
+    def start(names=('conversation',), *, home=None, host_runs=False):
         from aiohttp import web
         from gateway.config import PlatformConfig
         from gateway.platforms.api_server import APIServerAdapter
@@ -86,6 +96,9 @@ def runtime(isolated_home, tmp_path):
             api = APIServerAdapter(PlatformConfig(extra={'key': 'isolated-owner-key'}))
             api._session_db = db
             app = web.Application()
+            if host_runs:
+                app.router.add_post('/v1/runs', api._handle_runs)
+                app.router.add_get('/v1/runs/{run_id}', api._handle_get_run)
             for wire, _ in manager.get_platform_handler_factories('api_server'):
                 wire(app, api)
             yield SimpleNamespace(manager=manager, db=db, api=api, app=app, client=RouterClient(app), home=selected)

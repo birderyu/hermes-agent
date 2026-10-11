@@ -1,0 +1,109 @@
+{
+  "confirmation_id": "40000000-0000-4000-8000-000000000001",
+  "run_id": "fixture-run-1",
+  "confirmation": {
+    "version": 1,
+    "report_id": "30000000-0000-4000-8000-000000000002",
+    "kind": "inbox",
+    "changes": [
+      {
+        "op": "merge",
+        "item": "fixture-reminder-1",
+        "into": "fixture-reminder-2",
+        "title": "整理示例资料",
+        "by": "hermes"
+      },
+      {
+        "op": "update",
+        "item": "fixture-reminder-2",
+        "list": "等待",
+        "waiting_for": "示例联系人",
+        "follow_up": "2026-10-12",
+        "by": "user"
+      },
+      {
+        "op": "create_reminder",
+        "title": "准备示例材料",
+        "list": "工作",
+        "due": "2026-10-12",
+        "alarm": "2026-10-12T08:00:00+08:00",
+        "by": "hermes"
+      }
+    ]
+  },
+  "originals": {
+    "fixture-reminder-1": {
+      "source": "reminder",
+      "title": "示例资料",
+      "list": "收件箱",
+      "due": null,
+      "completed": false,
+      "modified_at": "2026-10-11T09:30:00+08:00"
+    },
+    "fixture-reminder-2": {
+      "source": "reminder",
+      "title": "另一条示例资料",
+      "list": "收件箱",
+      "due": null,
+      "completed": false,
+      "modified_at": "2026-10-11T09:30:00+08:00"
+    },
+    "fixture-event-1": {
+      "source": "event",
+      "title": "示例活动",
+      "list": "工作",
+      "due": null,
+      "completed": false,
+      "modified_at": "2026-10-11T09:30:00+08:00",
+      "start": "2026-10-12T10:00:00+08:00",
+      "end": "2026-10-12T11:00:00+08:00"
+    }
+  },
+  "allowed_item_ids": [
+    "fixture-reminder-1",
+    "fixture-reminder-2",
+    "fixture-event-1"
+  ],
+  "groups": [
+    {
+      "operation_id": "60000000-0000-4000-8000-000000000001",
+      "indices": [
+        0,
+        1
+      ],
+      "changes": [
+        {
+          "op": "merge",
+          "item": "fixture-reminder-1",
+          "into": "fixture-reminder-2",
+          "title": "整理示例资料",
+          "by": "hermes"
+        },
+        {
+          "op": "update",
+          "item": "fixture-reminder-2",
+          "list": "等待",
+          "waiting_for": "示例联系人",
+          "follow_up": "2026-10-12",
+          "by": "user"
+        }
+      ]
+    },
+    {
+      "operation_id": "60000000-0000-4000-8000-000000000003",
+      "indices": [
+        2
+      ],
+      "changes": [
+        {
+          "op": "create_reminder",
+          "title": "准备示例材料",
+          "list": "工作",
+          "due": "2026-10-12",
+          "alarm": "2026-10-12T08:00:00+08:00",
+          "by": "hermes"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+name: ollo-bridge
+version: 0.1.0
+manifest_version: 1
+description: Session-bound Ollo gateway transport and restricted Apple schedule execution.
+python_dependencies:
+  - "jsonschema>=4.23,<5"
+provides_tools:
+  - get_gtd_reports
+  - get_user_location
+  - execute_gtd_confirmation
+provides_hooks:
+  - pre_llm_call
+  - pre_tool_call
+  - on_session_end

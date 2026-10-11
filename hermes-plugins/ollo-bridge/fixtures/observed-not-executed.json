@@ -1,0 +1,9 @@
+{
+  "status": "failed_not_executed",
+  "outcome": {
+    "kind": "capture",
+    "status": "failed_not_executed",
+    "reason": "示例 helper 在启动前拒绝",
+    "retryable": true
+  }
+}

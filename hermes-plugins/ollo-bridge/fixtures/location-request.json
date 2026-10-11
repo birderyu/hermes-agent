@@ -1,0 +1,5 @@
+{
+  "max_age_seconds": 120,
+  "timeout_seconds": 15,
+  "runtime_call_id": "fixture-task:fixture-tool"
+}

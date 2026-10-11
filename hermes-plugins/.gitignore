@@ -5,6 +5,12 @@
 !/ollo-inbox/
 !/ollo-location/
 !/ollo-conversation/
+!/ollo-bridge/
+!/ollo-bridge/**/
+!/ollo-bridge/**/*.json
+!/ollo-bridge/**/*.md
+!/ollo-bridge/**/*.swift
+!/ollo-bridge/**/*.plist
 !/ollo-*/*.py
 !/ollo-*/*.yaml
 !/ollo-*/*.md

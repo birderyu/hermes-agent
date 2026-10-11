@@ -22,7 +22,10 @@ def read_config(home):
         name = value.get('name', 'Ollo')
         if not isinstance(name, str) or not name.strip() or len(name) > 100:
             raise ValueError('Invalid conversation name')
-        return {'session_id': value['session_id'], 'name': name}
+        mood = value.get('mood', True)
+        if not isinstance(mood, bool):
+            raise ValueError('Invalid mood flag')
+        return {'session_id': value['session_id'], 'name': name, 'mood': mood}
     except FileNotFoundError:
         return None
     except (OSError, ValueError) as exc:
@@ -57,7 +60,7 @@ def register(ctx):
                 return web.json_response({'error': 'Ollo conversation not configured'}, status=503)
             # Return the configured root ID. Session synchronization resolves its
             # continuation; discovery never opens or creates a SessionDB/session.
-            return web.json_response(config)
+            return web.json_response({'session_id': config['session_id'], 'name': config['name']})
 
         for path in ('/v1/ollo/conversation', '/v1/hermes-plus/conversation'):
             app.router.add_get(path, conversation)
@@ -77,7 +80,7 @@ def register(ctx):
         with pending_lock:
             if isinstance(turn_id, str) and turn_id:
                 pending.pop(turn_id, None)
-                if allowed:
+                if allowed and config['mood']:
                     pending[turn_id] = turn_input(user_message, conversation_history)
                     # Cancelled turns may never reach output transform or session-end.
                     while len(pending) > 64:
@@ -87,9 +90,12 @@ def register(ctx):
     def transform(response_text, session_id=None, platform=None, turn_id=None, **kwargs):
         if not isinstance(response_text, str) or not bound(session_id, platform):
             return None
+        body = strip_mood(response_text)
+        if not config['mood']:
+            # The host ignores empty replacements, including a stripped marker-only reply.
+            return body or '\n'
         with pending_lock:
             inputs = pending.pop(turn_id, None)
-        body = strip_mood(response_text)
         return with_mood(body, classifier.classify(inputs, body))
 
     def discard(turn_id=None, **kwargs):
