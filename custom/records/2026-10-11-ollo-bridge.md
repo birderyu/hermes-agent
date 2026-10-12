@@ -215,3 +215,23 @@ N3 修改与新增测试尚待设计会话沙箱外复测；上述 286/0 和 148
 撤回 README 的“原工具白名单改成 ollo_bridge”：这并非另一处已知配置，而是将注册工具组名误写成必要部署项。核对 integration.py::register、gateway/platforms/api_server.py::_create_agent、hermes_cli/tools_config.py::_get_platform_tools；Ollo App 对话走 api_server，当前没有保存的平台白名单，无需新增 platform_toolsets.api_server/ollo，更不能用 [ollo_bridge] 替换既有工具选择。四个任务的 enabled_toolsets=[] 保留且只作用于报告模型。核对 identity.py 与 integration.py 的既有确认标记逻辑后，本轮无需代码修改。
 
 验证仅做文档差异、空白与引用目标检查；无代码或测试改动，不运行 Python 测试、Swift 或完整 scripts/check。现有源码、三个受保护文档及暂存区与 D13 开始时一致；全程在 custom，未提交/推送、未访问运行 home/密钥、未改真实任务/Skill/config.yaml，也未部署或重启。此前 N3/D12 待复测及 D12 脚本失败/跨日边界状态不变。
+
+### D14（2026-10-12）：A6 日期合同与分钟精度兼容
+
+依据 Ollo `server/qa/contract-formats-a6-c13-2026-10-12.md` 和当前两份源合同同步。线上根因与错误数量来自设计会话，本轮未读取线上报告或运行环境。旧公共 ISODateTime 仅靠可选 `format: date-time`，缺少实现时纯日期同时命中 GTDDate 的两个 oneOf 分支。当前 bridge 的 `protocol.py` 已自行用标准库注册 date/date-time/uuid 检查器，因此不能把网关的缺包复现直接当成本插件运行路径的实测；离线 schema 及交给辅助模型的派生 schema 仍必须独立满足 A6。
+
+**合同：** 使用既有 `contracts/export_schema.py` 从 Ollo 源文件完整重导出 `contracts/schema.json`，仍为 101 个定义、192 处本地引用。ISODate 增加形状与真实日历日期 pattern；ISODateTime 改用含时区的完整 pattern，接受分钟、秒、小数秒，移除要求秒必填的 `format: date-time`。GTDDate 保留 oneOf，但在所有格式检查关闭时也互斥。`protocol.schema()` 的各入口从该包提取引用闭包，无第二份手写派生定义。源合同散列与同步说明更新到 contracts/README；本次完整导出也带入源合同关于 agenda 成功日账和展示正文去围栏的说明，未在 bridge 中增加对应网关逻辑。
+
+**时间解析：** `protocol.py` 的 stdlib 检查器、`execution.py::business_day` 和 `collector.py::validate_collection` 使用 `datetime.fromisoformat`，支持带时区的分钟精度，无需修改 Python 生产逻辑。EventKit `parseDate` 在进入原 ISO8601DateFormatter 前，仅对完整的 `YYYY-MM-DDTHH:MMZ/±HH:MM` 输入补 `:00`；无时区输入不参与补秒。日期、秒、小数秒路径保留，iso/fractional 输出格式器未变。提醒 due/follow_up/alarm、日历 start/end、采集窗口与 originals 前置比较共用这一解析入口；7 秒自退逻辑不变。
+
+**回归测试已补，尚未运行：** 新增 `test_datetime_contract.py`，显式构造仅 date/uuid 与完全无 format 两种 FormatChecker，并断言没有 date-time；替换 bridge 自有检查器以避免其掩盖 schema 依赖。整包和按入口派生的 schema 均覆盖 GTDReport（含 agenda/originals）、GTDSuggestion、GTDConfirmation、ScheduleItem，验证纯日期只命中 ISODate、带时区时间只命中 ISODateTime、无时区时间拒绝。覆盖分钟/秒/小数秒、闰年/世纪年、真实日期、年范围、时区偏移、24 点/闰秒/空白/大小写及 64 字符边界；并覆盖执行业务日期换算与采集时间原文保留。Swift 的既有纯逻辑 `--self-test` 增加分钟精度的正/负偏移与 Z、components、originals 等价/冲突比较、无时区拒绝及输出格式断言，由既有 macOS 原生合同测试入口运行，不创建 EventStore。
+
+**本轮验证：** 35 个 Python 文件 AST、43 份 JSON 解析、101 个定义/192 处本地引用解析、导出结果与当前 A6 源文件逐字一致检查、`git diff --check` 均通过；`xcrun swiftc -module-cache-path <临时目录> -typecheck` 通过。使用已有隔离开发解释器执行导出，没有安装任何包或修改 pm 环境。按此前约定，未运行 Python 测试、collect-only、helper 自检、完整 scripts/check 或官方基线对照，行为验证留给设计会话沙箱外 runner；不借用 Ollo QA 的 1670 passed 作为 Hermes 测试结果。
+
+没有新增或扩大宿主补丁，Hermes 核心、`pyproject.toml`、`uv.lock` 均未改。只在 custom 工作区修改插件与本记录；暂存区及三个禁止编辑文档与 D14 开始时一致，其他会话已有的记录改动保留。未访问运行 home、密钥、真实 Apple store 或服务，未部署、重启、提交或推送；本记录不代表线上故障已通过部署消除。
+
+### D14 沙箱外复测：399/2，修正 alarm 的测试类型假设
+
+设计会话通过 `scripts/run_tests.sh hermes-plugins/` 回传 **399 passed、2 failed**；已核对 `fork-plugins-D14.log`。两个失败分别是日期测试的 stdlib-formats/no-formats 参数，均因将 `GTDConfirmation.changes[2].alarm` 改为纯日期后未抛 BridgeError。该元素是 `op=create_reminder`：源合同 `openapi.yaml` 的 `GTDConfirmedChange → GTDChange.oneOf[create_reminder].properties.alarm` 明确定义为 `anyOf: [GTDDate, null]`；GTDDate 又是 ISODate/ISODateTime 的 oneOf。离线 schema 与此一致，合法纯日期应通过；这是测试把 alarm 错当 ISODateTime，不是 A6 合同遗漏。
+
+本轮只修测试与本记录。公共确认样例增加 `update_event`，将 timestamp_path 改为 `changes[3].start`，其合同为 ISODateTime，继续断言纯日期和无时区时间均拒绝。新增 alarm 正反例，在两种无 date-time 检查器配置下同时验证整包与派生 schema：纯日期、带时区的分钟/小数秒时间、null 和省略均通过；无时区分钟/秒时间及非法日历日期拒绝。未修改 Ollo 合同、离线 schema、生产校验器或 helper，也未删除原有拒绝断言。Python AST 与差异空白检查通过；按约定未在沙箱内运行测试，399/2 是本次修正前的外部结果，修正后待复测。暂存区、禁止编辑文档及其他既有改动保持不变；未提交、推送、部署或访问运行 home。
