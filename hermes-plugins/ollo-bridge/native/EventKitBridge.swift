@@ -44,7 +44,12 @@ func string(_ value: Any?) throws -> String {
 }
 func parseDate(_ value: Any?) throws -> Date {
     let raw = try string(value)
-    if let result = iso.date(from: raw) ?? fractional.date(from: raw) { return result }
+    // A6 accepts minute precision; Foundation's InternetDateTime parser requires
+    // seconds. Expand only that input shape, leaving all output formatters intact.
+    let timestamp = raw.range(of: #"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(?:Z|[+-][0-9]{2}:[0-9]{2})\z"#,
+                              options: .regularExpression) != nil
+        ? String(raw.prefix(16)) + ":00" + String(raw.dropFirst(16)) : raw
+    if let result = iso.date(from: timestamp) ?? fractional.date(from: timestamp) { return result }
     let parser = DateFormatter()
     parser.locale = Locale(identifier: "en_US_POSIX"); parser.timeZone = zone
     parser.dateFormat = "yyyy-MM-dd"; parser.isLenient = false
@@ -422,6 +427,31 @@ final class Bridge {
     }
 }
 
+func testMinutePrecisionDates() throws {
+    let expected = try parseDate("2026-10-12T10:00:00+08:00")
+    for raw in ["2026-10-12T10:00+08:00", "2026-10-12T02:00Z", "2026-10-11T22:00-04:00"] {
+        let parsed = try parseDate(raw)
+        let parts = try components(raw)
+        assert(parsed == expected)
+        assert(parts?.day == 12 && parts?.hour == 10 && parts?.minute == 0 && parts?.second == 0)
+        // Existing output keeps seconds (and milliseconds for collection stamps).
+        assert(iso.string(from: parsed) == "2026-10-12T10:00:00+08:00")
+        assert(fractional.string(from: parsed) == "2026-10-12T02:00:00.000Z")
+        for key in ["due", "modified_at", "start", "end"] {
+            assert(matchesOriginal([key: raw], [key: "2026-10-12T02:00:00.000Z"]))
+            assert(!matchesOriginal([key: raw], [key: "2026-10-12T02:01:00Z"]))
+        }
+    }
+    let dateOnly = try components("2026-10-12")
+    assert(dateOnly?.day == 12 && dateOnly?.hour == nil)
+    let fraction = try parseDate("2026-10-12T02:00:00.125Z")
+    assert(abs(fraction.timeIntervalSince(expected) - 0.125) < 0.001)
+    for raw in ["2026-10-12T10:00", "2026-10-12T10:00:00"] {
+        do { _ = try parseDate(raw); assertionFailure("Missing timezone accepted") }
+        catch is BridgeError {}
+    }
+}
+
 func testAppleMappingAndCollection() throws {
     let defaults = try AppleNames()
     assert(defaults.actual("收件箱", .reminder) == "收件箱")
@@ -463,6 +493,7 @@ func testAppleMappingAndCollection() throws {
 // This branch is safe for development: it creates no EKEventStore and calls no permission APIs.
 if CommandLine.arguments.contains("--self-test") {
     do {
+        try testMinutePrecisionDates()
         try testAppleMappingAndCollection()
         let dateOnly = try components("2026-10-05")
         let timed = try components("2026-10-05T21:00:00+08:00")

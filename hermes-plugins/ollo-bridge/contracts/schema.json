@@ -48,7 +48,7 @@
           "$ref": "#/$defs/B_DeliveryKind"
         }
       },
-      "description": "仅 live adapter 与宿主持久 delivery queue；身份/执行开始时间来自可信宿主。agenda 必须带 business_date（由任务时区和原执行日期确定），wake 时带 trigger_id；网关按 job 白名单判类别，不能相信模型日期。保留最后 GTD 原围栏，缺 UUID/可信日期拒收；执行早于部署截点则 409/stale_execution。 gtd.kind 必须匹配白名单类别，否则按坏结构降级纯文本，不从模型输出修改任务类别。 delivery_kind 必填且来自宿主本次执行的可信失败标记。failure 忽略所有 GTD 围栏，公开 body 为「没有生成」、gtd=null；原 body 可保存为不可变 raw_body，但不进入锁屏，不占 agenda 日账、不触发 suppressed，兜底正常生成；report 才参与 agenda 成功日账。"
+      "description": "仅 live adapter 与宿主持久 delivery queue；身份/执行开始时间来自可信宿主。agenda 必须带 business_date（由任务时区和原执行日期确定），wake 时带 trigger_id；网关按 job 白名单判类别，不能相信模型日期。保留最后 GTD 原围栏，缺 UUID/可信日期拒收；执行早于部署截点则 409/stale_execution。 gtd.kind 必须匹配白名单类别，否则按坏结构降级纯文本，不从模型输出修改任务类别。 delivery_kind 必填且来自宿主本次执行的可信失败标记。failure 忽略所有 GTD 围栏，公开 body 为「没有生成」、gtd=null；原 body 可保存为不可变 raw_body，但不进入锁屏，不占 agenda 日账、不触发 suppressed，兜底正常生成。report 中仅带合法 gtd.kind=agenda 的 agenda 报告占用当天成功日账；缺失或坏结构降级的纯文字 agenda report 照常入箱和推送，不占日账。 当天已有成功报告时，后来的任何 agenda report（包括纯文字）仍被 suppressed。"
     },
     "B_UUID": {
       "$ref": "#/$defs/P_UUID"
@@ -65,9 +65,9 @@
     },
     "P_ISODateTime": {
       "type": "string",
-      "format": "date-time",
+      "pattern": "^(?:(?!0000)[0-9]{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12][0-9]|3[01])|(?:0[469]|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8]))|(?:[0-9]{2}(?:0[48]|[2468][048]|[13579][26])|(?:0[48]|[2468][048]|[13579][26])00)-02-29)T(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9](?:\\.[0-9]+)?)?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])$(?![\\s\\S])",
       "maxLength": 64,
-      "description": "ISO 8601 时间字符串，必须带时区；支持小数秒。"
+      "description": "ISO 8601 时间 YYYY-MM-DDTHH:MM(:SS(.fraction)?)?，必须带大写 Z 或 ±HH:MM 时区。 年为 0001–9999，校验真实日历日期（含闰年）、时 00–23、分/秒 00–59、偏移时 00–23/分 00–59；不接收闰秒、空白或小写 t/z。 pattern 是完整约束，不依赖 JSON Schema 可选格式包；不用要求必填秒的 format:date-time，以支持只到分钟的 ISO 时间。"
     },
     "B_ISODate": {
       "$ref": "#/$defs/P_ISODate"
@@ -75,9 +75,15 @@
     "P_ISODate": {
       "type": "string",
       "format": "date",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "allOf": [
+        {
+          "pattern": "^(?:(?!0000)[0-9]{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12][0-9]|3[01])|(?:0[469]|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8]))|(?:[0-9]{2}(?:0[48]|[2468][048]|[13579][26])|(?:0[48]|[2468][048]|[13579][26])00)-02-29)$"
+        }
+      ],
       "minLength": 10,
       "maxLength": 10,
-      "description": "ISO 8601 日期 YYYY-MM-DD（Asia/Shanghai），不是时间戳。"
+      "description": "ISO 8601 日期 YYYY-MM-DD（Asia/Shanghai），不是时间戳；0001–9999 年的真实日历日期（含闰年），pattern 在关闭格式检查时也拒绝非法日期。"
     },
     "B_DeliveryKind": {
       "$ref": "#/$defs/P_DeliveryKind"
@@ -109,7 +115,7 @@
           "type": "boolean"
         }
       },
-      "description": "首次 201；同 execution 同 delivery_kind/标题/正文 200 返回同身份，异内容 409。delivery_kind=report 的 agenda 当天另一 execution 200/suppressed=true，返回已存报告且不推送；被抑制 execution 也持久记录指纹。成功只在报告/推送同事务提交后返回。 failure 始终 suppressed=false，不读取或写入 agenda 成功日账；delivery_kind 是同执行重放指纹的一部分，异类型重放返回 409/request_id_conflict。"
+      "description": "首次 201；同 execution 同 delivery_kind/标题/正文 200 返回原回执，异内容 409。只有带合法 gtd.kind=agenda 的 agenda report 占用当天成功日账；缺失或坏结构降级的纯文字报告照常入箱和推送，不占日账。 当天日账已被占用时，另一 execution 的任何 agenda report（包括纯文字）返回 200/suppressed=true，返回已存成功报告且不入箱、不推送；被抑制 execution 也持久记录指纹。 原 execution 重放始终返回原回执，不因后来的报告占用日账而改变。成功只在报告/推送同事务提交后返回。failure 始终 suppressed=false，不读取或写入 agenda 成功日账；delivery_kind 是同执行重放指纹的一部分，异类型重放返回 409/request_id_conflict。"
     },
     "B_Sequence": {
       "$ref": "#/$defs/P_Sequence"
@@ -174,7 +180,7 @@
           "minLength": 0,
           "maxLength": 128000,
           "x-max-utf8-bytes": 128000,
-          "description": "展示正文；合法 gtd 围栏移到 gtd；坏围栏保留完整文字。"
+          "description": "展示正文；移除所有顶层 hermes-plus-gtd 与 hermes-plus-gtd-result 围栏，包括坏块和未闭合块。结构无效仍降级为 gtd=null，不能回捞更早块；清理后为空时使用报告标题、换行及固定文字「没有生成」。raw_body 保留收到的不可变原文，仅供内部排查，不向 App 展示。"
         },
         "created_at": {
           "$ref": "#/$defs/P_UnixSeconds"
@@ -216,7 +222,7 @@
           "$ref": "#/$defs/P_DeliveryKind"
         }
       },
-      "description": "id/Unix 秒沿用 InboxReport，URL 仍用 report_id；只保存切换后新报告。gtd_kind/gtd_counts 如返回必须与 gtd 一致，坏结构为 null；originals 可从 App 响应省略。 delivery_kind 必须返回；failure 为纯文字「没有生成」、gtd=null（gtd_kind/gtd_counts 如返回也为 null），标题来自可信任务类别，不占 agenda 日账、不被同日成功报告 suppressed。",
+      "description": "id/Unix 秒沿用 InboxReport，URL 仍用 report_id；只保存切换后新报告。gtd_kind/gtd_counts 如返回必须与 gtd 一致，坏结构为 null；originals 可从 App 响应省略。 delivery_kind 必须返回；failure 为纯文字「没有生成」、gtd=null（gtd_kind/gtd_counts 如返回也为 null），标题来自可信任务类别，不占 agenda 日账、不被同日成功报告 suppressed。delivery_kind=report 的 agenda 仅在带有合法结构化 gtd 且 gtd.kind=agenda 时占用当天成功日账；缺失或坏结构降级的纯文字报告照常入箱和推送，不占日账，后续兜底仍可生成。 当天日账已有成功报告时，后来的任何 agenda report（包括纯文字）均 suppressed，不重复入箱或推送。",
       "dependentRequired": {
         "gtd_kind": [
           "gtd_counts"
@@ -414,7 +420,7 @@
           "$ref": "#/$defs/P_GTDOriginals"
         }
       },
-      "description": "hermes-plus-gtd v1：取最后一个顶层围栏；缺失/坏块整份纯文本降级，不能回捞更早块。所有引用/原值关系及重复 item ID 由业务验证。 GTD 主事项、agenda、关联事项、建议、候选与变更中的标题均最多 4096 UTF-8 字节；originals 标题无损保存。字段扩容不放宽投递 body 的 128000 UTF-8 字节总限额。",
+      "description": "hermes-plus-gtd v1：取最后一个顶层围栏；缺失/坏块整份降级为 gtd=null，不能回捞更早块。展示正文一律去掉报告/结果围栏，包含坏块与未闭合块；清理后为空则显示报告标题与「没有生成」，原文仅在内部 raw_body 保留。所有引用/原值关系及重复 item ID 由业务验证。 GTD 主事项、agenda、关联事项、建议、候选与变更中的标题均最多 4096 UTF-8 字节；originals 标题无损保存。字段扩容不放宽投递 body 的 128000 UTF-8 字节总限额。",
       "allOf": [
         {
           "if": {
@@ -1251,7 +1257,7 @@
           "$ref": "#/$defs/P_ISODateTime"
         }
       ],
-      "description": "ISO 日期或带时区的 ISO 时间；沿用 Core 的 String，不接收 Unix 数字。"
+      "description": "ISO 日期或带时区的 ISO 时间；日期分支不含 T，时间分支必含 T 和时区，oneOf 不依赖 format 检查而互斥。沿用 Core 的 String，不接收 Unix 数字。"
     },
     "P_GTDSuggestion": {
       "type": "object",
@@ -3069,7 +3075,7 @@
           }
         }
       ],
-      "description": "以入库报告为 generated；仅触发意图不阻止固定兜底。运行前查询是优化，最后投递事务的 binding+日期唯一键才防两份。"
+      "description": "仅带合法 gtd.kind=agenda 的 agenda report 入库才占用成功日账并成为 generated；纯文字、坏结构降级报告和仅触发意图均不阻止固定兜底。 运行前查询是优化，最后投递事务的 binding+日期唯一键才防两份合法报告；日账占用后的任何 agenda report（包括纯文字）均 suppressed。"
     },
     "B_ScheduleItemsResponse": {
       "$ref": "#/$defs/P_ScheduleItemsResponse"
@@ -3343,7 +3349,7 @@
           ]
         }
       },
-      "description": "triggered=已持久接受既有 cron 的提前触发，不表示报告已生成。generated 只在当天报告入库后成立。兜底仍由 Hermes 负责（工作日 08:00，周末 09:30），当天最多一份报告/推送。"
+      "description": "triggered=已持久接受既有 cron 的提前触发，不表示报告已生成。already_generated 以当天成功日账为准；仅带有合法 gtd.kind=agenda 的 agenda report 入库才占用日账。 缺失或坏结构降级的纯文字 agenda report 照常入箱和推送，不阻挡后续兜底。兜底仍由 Hermes 负责（工作日 08:00，周末 09:30），当天最多一份合法结构化 agenda 报告；日账占用后的任何 agenda report（含纯文字）均被抑制。"
     },
     "B_ScheduleInterpretResponse": {
       "$ref": "#/$defs/P_ScheduleInterpretResponse"
