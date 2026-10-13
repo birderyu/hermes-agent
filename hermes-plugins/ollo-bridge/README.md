@@ -91,7 +91,7 @@ Telegram 话题路由及原 relay 测试已恢复，未搬移。相关记录见 
 | `plugins.entries.ollo-location` | 删除已停用插件的这条旧配置，作为清理；留着不会启用旧插件，但不再需要。其他 entries 保留。 |
 | `plugins.entries.ollo-bridge` | **不必新增或由旧项改名。** bridge 注册工具不使用 override，缺省也不授予 tools.override；无需 allow_tool_override。若运维坚持显式记录 false，可写同值，但不是接入所需差异，不能改成 true。 |
 | `platforms.ollo.enabled`、`platforms.hermes_plus.enabled`、`platforms.photon.enabled` | 本次 bridge 接入无配置增量，保留当前值；旧消息渠道的整体停用不在这份接入差异中。四个 GTD 任务的 deliver 改为 ollo:main 是任务配置，不在 config.yaml。 |
-| `timezone` | 不必新增。宿主无显式时区覆盖时跟随本机时区，用户已确认本机为 Asia/Shanghai；显式固定 timezone: Asia/Shanghai 是可选项，不是 bridge 依赖。 |
+| `timezone` | **必须**写 `timezone: Asia/Shanghai`。`wake.py` 要求 `cron.get_timezone()` 的 key 为 Asia/Shanghai，未配置时它返回 None（跟随本机），wake 一律 `503/not_configured`。2026-10-12 首次真机「我醒了」因此失败，加上后重启修复；本机为 +08:00 时加此项不改变任何任务的 next_run_at。 |
 | `platform_toolsets.ollo`、`platform_toolsets.api_server` | **不新增、不改写。** 保留 Ollo 对话原有工具能力，包括 Apple Skill 所需工具。 |
 
 修改后的 enabled 列表为（只替换此列表，不覆盖其他 plugins 配置）：
@@ -148,7 +148,7 @@ capture 的 URL 固定为 `ollo://capture/<request_id>`，不写进标题或备�
 1. 在沙箱外跑下面测试及 B+C/D 联测，核对源码、模型替身结果与跨仓库 run 映射；生产 `schedule` 保持关闭。D12 已对照提供的四任务原提示和 Skill 快照，审阅完整候选及下文的脚本失败/跨日边界。
 2. 在授权窗口暂停新调度、旧投递/推送，按方案一致备份旧插件、配置和 SQLite；不读旧业务表，不导入/重放旧数据。明确切换截点，隔离截点之前或缺可信时间的执行与旧队列。
 3. 用户在网关与 Hermes 终端写入独立 bridge key、匹配 binding/根会话/四任务白名单、回环 URL/端口与网关切换截点。按选定绝对路径编译/安装 `native/EventKitBridge.swift`，链接配套 `native/Info.plist` 的权限用途说明（`swiftc … -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker native/Info.plist -o …`）；由用户显式完成 Apple 提醒事项与日历权限。`--authorize` 才会请求权限，普通执行不会弹授权请求。
-4. 部署 fork 的宿主增量和**完整**插件目录（运行必需 `.py`、plugin.yaml、contracts/schema.json）；按上文精确差异替换 plugins.enabled，清理旧 location entry，保留旧目录。不新增 Ollo/API 工具白名单，不要求新增 bridge entry 或 timezone，现有平台 enabled 配置无需为 bridge 改写；同一平台/工具/发现路由不能重复注册。按已有授权维护流程排空并重启 Hermes；本次未授权自动执行此步。
+4. 部署 fork 的宿主增量和**完整**插件目录（运行必需 `.py`、plugin.yaml、contracts/schema.json）；按上文精确差异替换 plugins.enabled，清理旧 location entry，保留旧目录。不新增 Ollo/API 工具白名单，不要求新增 bridge entry，但必须写 `timezone: Asia/Shanghai`（见上表），现有平台 enabled 配置无需为 bridge 改写；同一平台/工具/发现路由不能重复注册。按已有授权维护流程排空并重启 Hermes；本次未授权自动执行此步。
 5. 按下一节安装四个脚本文件，更新现行 gtd 的差异和 v1 Skill、四段完整提示词；保留 job ID、08:00/09:30/21:00 时刻、模型与 repeat。全部单投 Ollo、无附件、attach_to_session=false、enabled_toolsets=[]。核对 failure_deliver 为空继承或同样单投 Ollo；这只配置真正宿主失败的路由，不会把 Script Error 自动升级为失败投递。
 6. 配置 `apple` 把六清单、三日历分别对应到「Ollo 测试·…」，重载配置后用专用假事项验收 wake 兜底、capture、items/interpret、确认、Apple/iCloud 回执；另验收 App/SSE、通知、位置。APNs 与自动位置在网关配置，手机重新开启授权。完成后撤掉测试对应表并重载；测试报告/确认不能继续作为生产写入授权。解决下面失败/跨日边界并按单独发布授权打开能力、恢复自然调度。
 

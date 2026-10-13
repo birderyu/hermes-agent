@@ -1,0 +1,21 @@
+{
+  "reports": [
+    {
+      "id": "30000000-0000-4000-8000-000000000001",
+      "sequence": 1,
+      "title": "今日安排",
+      "body": "这是一份合成的合同示例报告。",
+      "truncated": false,
+      "focus_confirmed": {
+        "item_ids": [
+          "fixture-reminder-1"
+        ],
+        "confirmed_at": 1791763200.125
+      }
+    }
+  ],
+  "location": {
+    "authorized_devices": 1,
+    "shared_point": null
+  }
+}

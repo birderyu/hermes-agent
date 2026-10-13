@@ -173,6 +173,9 @@ class Schedule:
         document = await self._confirmation_document(confirmation_id, headers)
         validate('B_BridgeConfirmation', document)
         require(document['confirmation_id'] == confirmation_id and document['run_id'] == runtime['task_id'], 'forbidden', 403)
+        # A7 still decodes historical agenda confirmations, but they no longer
+        # authorize writes. Reject before claiming any group or replaying receipts.
+        require(document['confirmation']['kind'] != 'agenda')
         self._check_groups(document)
         results = []
         receipts = {}

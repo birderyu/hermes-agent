@@ -132,8 +132,10 @@ async def test_interpret_isolated_and_rejects_model_expansion(service, gateway):
 
 
 @pytest.mark.asyncio
-async def test_confirmation_runtime_groups_real_receipts_and_replay(service, gateway):
+@pytest.mark.parametrize('kind', ['inbox', 'review'])
+async def test_confirmation_runtime_groups_real_receipts_and_replay(service, gateway, kind):
     document = example('confirmation')
+    document['confirmation']['kind'] = kind
     cid = document['confirmation_id']
     gateway.routes[('GET', '/internal/v1/schedule/confirmations/' + cid)] = (200, document)
     runtime = {'source': 'tool', 'session_id': 'tip', 'task_id': document['run_id'], 'tool_call_id': 'call'}

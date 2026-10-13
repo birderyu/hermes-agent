@@ -15,6 +15,8 @@ platforms: [macos]
 
 本 Skill 的卡片授权约束仅用于定时报告（今日安排、清理收件箱、每周回顾）提出的建议。用户在 Ollo 对话里直接请求“帮我加个提醒”“把 X 移到工作”等，仍按现行 gtd 规则：先列出确切变更，得到用户在对话中的明确确认后，用 `apple-reminders` / `apple-calendar` Skill 执行，仅执行确认的内容。普通文字“确认”不能授权报告建议，但可以在上述直接请求流程中确认已列出的变更；不得混淆两类来源。
 
+今日安排的重点确认只由网关记住，不改提醒事项；不能把确认重点转换为“设今天到期”，不能覆盖真实截止日、顺延超期项或移动清单。App 通过报告的 focus 接口保存选择，模型不提交该接口，也不生成 agenda 的确认/执行结果围栏。读取报告和 context 的 `focus_confirmed` 判断当前选择；缺失/null 表示未确认，`preselected` 只是建议。选择只属于该报告日期，不因 confirmed_at 在今天就沿用旧报告重点；context 缺少日期或标题时用 `get_gtd_reports` 读完整报告核对。
+
 候选部署使用三个固定入口 `ollo_collect_agenda.py`、`ollo_collect_inbox.py`、`ollo_collect_review.py`，各一次调用配套 EventKit helper 的 `collect`，stdout 输出一份 `items/originals/collected_at`。默认 agenda/review 读取收件箱/工作/生活/家庭/等待/长期全部未完成项，含所有超期和无日期候选；agenda 读今天三个日历，review 读采集时刻起未来七天。inbox 仅收件箱、不读日历。名称是 `bridge.json` 对应表的逻辑名，originals 和确认比较使用同一映射。每次最多 500 项，超限/权限/读取失败都明确失败；零项仍输出非空 JSON。任务设 `enabled_toolsets: []`，不向报告生成模型提供任何工具。
 
 普通 agent cron 的 Script Error 仍交给模型，提示词必须明确未生成、不输出假空卡片；这本身不会令宿主设置 for_failure。脚本也不收到原 wake 日期，窗口取上海实际采集时间；外层可信业务日期可能不同。上线核对和现行 gtd 的逐行差异见 [完整提示词](cron-prompts-candidate.md) 与 [Skill 差异](gtd-skill-update-candidate.md)。
@@ -35,7 +37,7 @@ platforms: [macos]
 
 ## 报告建议的卡片确认与结果
 
-定时报告提出的建议只能经 Ollo 卡片确认后执行，普通文字“确认”不构成这类修改的许可。App 通过网关提交卡片确认；调用 `execute_gtd_confirmation(confirmation_id)` 时只传当前提交 ID，不传 changes、originals、run_id、session_id 或任意工具参数。网关必须将该确认映射到当前真实 Hermes run；取不到授权即停止执行，不按“最近确认”猜测，也不转 Apple Skill 绕过卡片许可。
+清理收件箱与每周回顾（inbox/review）提出的修改建议只能经 Ollo 卡片确认后执行，普通文字“确认”不构成这类修改的许可。App 通过网关提交卡片确认；调用 `execute_gtd_confirmation(confirmation_id)` 时只传当前提交 ID，不传 changes、originals、run_id、session_id 或任意工具参数。网关必须将该确认映射到当前真实 Hermes run；取不到授权即停止执行，不按“最近确认”猜测，也不转 Apple Skill 绕过卡片许可。agenda 确认仅保留历史解码形状，新提交或旧确认执行均为 400/invalid_request，不转换成重点选择或 Apple 操作。
 
 带报告卡片确认标记的当前回合只能走该工具；这一约束不覆盖普通对话直接请求的确认流程。工具核对生成时原值、分组领取许可，一组暂存后一次 commit；不相关组独立。工具返回 done 才能说明成功，skipped/failed 逐项解释。unknown 表示写入可能已发生，需核对，不能换 UUID 重试、搜索相似标题猜成功或声称已回滚。
 

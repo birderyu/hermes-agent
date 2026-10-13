@@ -145,7 +145,7 @@
           "pattern": "\\S"
         }
       },
-      "description": "report.gtd 含完整已保存 originals；raw_body 是收到的不可变原文，含围栏。资料不等于用户确认。"
+      "description": "report.gtd 含完整已保存 originals；report.focus_confirmed 同公共报告，为网关保存的最新重点（缺失/null 为尚未确认）。raw_body 是收到的不可变原文，含围栏，不会随重点变化；使用 focus_confirmed 而不是 preselected 判断用户选择。重点只是对话背景，不授权 Apple 变更。"
     },
     "B_Report": {
       "$ref": "#/$defs/P_Report"
@@ -220,6 +220,17 @@
         },
         "delivery_kind": {
           "$ref": "#/$defs/P_DeliveryKind"
+        },
+        "focus_confirmed": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/P_FocusConfirmed"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "网关保存的重点；缺失/null 表示尚未确认，不能从 preselected 或旧 agenda GTDConfirmation 推断。只在合法 agenda 报告上有值，所有设备共享。"
         }
       },
       "description": "id/Unix 秒沿用 InboxReport，URL 仍用 report_id；只保存切换后新报告。gtd_kind/gtd_counts 如返回必须与 gtd 一致，坏结构为 null；originals 可从 App 响应省略。 delivery_kind 必须返回；failure 为纯文字「没有生成」、gtd=null（gtd_kind/gtd_counts 如返回也为 null），标题来自可信任务类别，不占 agenda 日账、不被同日成功报告 suppressed。delivery_kind=report 的 agenda 仅在带有合法结构化 gtd 且 gtd.kind=agenda 时占用当天成功日账；缺失或坏结构降级的纯文字报告照常入箱和推送，不占日账，后续兜底仍可生成。 当天日账已有成功报告时，后来的任何 agenda report（包括纯文字）均 suppressed，不重复入箱或推送。",
@@ -232,6 +243,33 @@
         ]
       },
       "allOf": [
+        {
+          "if": {
+            "properties": {
+              "gtd": {
+                "type": "object",
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "agenda"
+                  }
+                }
+              },
+              "delivery_kind": {
+                "const": "report"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "focus_confirmed": {
+                "type": "null"
+              }
+            }
+          }
+        },
         {
           "if": {
             "properties": {
@@ -1781,6 +1819,29 @@
       ],
       "description": "同一次报告采集中取得的原值，不能在投递/确认时补采；modified_at 来自 Apple 读取，不能用 generated_at 代替。 title 与事项原值逐字一致；不能因标题超过旧的 512 字符而省略 originals 或替换为显示摘要。"
     },
+    "P_FocusConfirmed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "item_ids",
+        "confirmed_at"
+      ],
+      "properties": {
+        "item_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P_ItemID"
+          },
+          "minItems": 1,
+          "maxItems": 3,
+          "uniqueItems": true
+        },
+        "confirmed_at": {
+          "$ref": "#/$defs/P_UnixSeconds"
+        }
+      },
+      "description": "按报告 focus 顺序的 ID 集合及网关确认的 Unix 秒（可含小数）；相同集合重放不刷新时间。独立于不可变报告，不是 Apple 写入授权。"
+    },
     "B_BridgeReportPage": {
       "type": "object",
       "additionalProperties": false,
@@ -1833,9 +1894,19 @@
         },
         "truncated": {
           "type": "boolean"
+        },
+        "focus_confirmed": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/P_FocusConfirmed"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
-      "description": "最近 6 份以内；超长正文置引用占位，整组 body 总计 ≤24000 Unicode 字符。"
+      "description": "最近 6 份以内；超长正文置引用占位，整组 body 总计 ≤24000 Unicode 字符。focus_confirmed 是该报告的最新重点，正文截短时仍保留；缺失/null 为尚未确认，不沿用到其他日期，不据此执行 Apple 改动。"
     },
     "B_BridgeLocationContext": {
       "type": "object",
@@ -2584,7 +2655,7 @@
           "maxItems": 100
         }
       },
-      "description": "hermes-plus-gtd-confirm：用户仅授权此报告列明的改动，最多 100 项；item/into 必须属于报告允许引用集。按报告+依赖组规范操作持久去重，排除 by/组外排序。"
+      "description": "hermes-plus-gtd-confirm：用户仅授权此报告列明的改动，最多 100 项；item/into 必须属于报告允许引用集。按报告+依赖组规范操作持久去重，排除 by/组外排序。 A7（2026-10-12 决定）：kind=agenda 不再用于确认今日重点，改用 PUT /v1/inbox/reports/{report_id}/focus； kind 枚举仅为读取旧历史保留 agenda。新的对话提交（包括旧幂等键重提）收到 agenda 确认一律 400/invalid_request，说明改用 focus 接口， 在调用 Agent 或返回旧回执前拒绝，不把旧 update due 动作自动转换成重点，以免误解既有 Apple 写入意图。 升级前已保存的 agenda 确认不再签发新的执行许可（claim 返回 400/invalid_request），已签发许可的 finish 仍接收以保留真实执行结果。"
     },
     "B_GTDOriginals": {
       "$ref": "#/$defs/P_GTDOriginals"

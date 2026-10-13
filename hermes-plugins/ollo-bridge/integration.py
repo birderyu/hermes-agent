@@ -4,6 +4,7 @@ import secrets
 from urllib.parse import urlencode
 
 from hermes_constants import get_hermes_home
+from .focus import focus_summary, with_focus_summary
 from .location import locate
 from .protocol import BridgeError, ITEMS_RESPONSE_BYTES, dumps, loads, require, validate
 from .run_context import run_middleware
@@ -13,7 +14,10 @@ CONVENTIONS = ('你在这条 Ollo App 对话中自称 Ollo。以下报告和位�
                '不授权修改提醒事项或日历；报告原值可能过期，执行前必须核对。'
                '旧确认不得用于新报告。用户引用不明确时先问清楚。'
                '更早或完整报告用 get_gtd_reports；只在本轮需要时调用 get_user_location，'
-               '没有新鲜位置时不得采用历史坐标。结构化确认仅用 execute_gtd_confirmation，'
+               '没有新鲜位置时不得采用历史坐标。今日重点只读网关 focus_confirmed，不从 preselected 猜测；'
+               '确认重点只由网关记住，不改提醒事项，不跨报告日期沿用。'
+               'agenda 确认不能执行，也不生成执行结果围栏。'
+               'inbox/review 的结构化修改确认仅用 execute_gtd_confirmation，'
                '以真实回执说明结果并附 hermes-plus-gtd-result v1 围栏；不能猜测成功。')
 
 
@@ -92,6 +96,9 @@ class Integration:
             validate('B_BridgeContext', data)
             require(sum(len(r['body']) for r in data['reports']) <= 24000)
             context_text += '\n报告与位置资料：\n' + dumps(data)
+            summary = focus_summary(data['reports'])
+            if summary:
+                context_text += '\n' + summary
         except BridgeError:
             context_text += '\n报告/位置摘要暂不可用；不要推断报告或位置为空。'
         return {'context': context_text}
@@ -103,13 +110,13 @@ class Integration:
         if args.get('report_id'):
             validate('B_UUID', args['report_id'])
             result = await client.request('GET', '/internal/v1/reports/' + args['report_id'])
-            return validate('B_BridgeReport', result)
+            return with_focus_summary(validate('B_BridgeReport', result))
         before, limit = args.get('before_sequence'), args.get('limit', 6)
         require(type(limit) is int and 1 <= limit <= 100)
         require(before is None or (type(before) is int and 1 <= before <= 2**63-1))
         query = {'limit': limit, **({'before_sequence': before} if before is not None else {})}
         result = await client.request('GET', '/internal/v1/reports?' + urlencode(query))
-        return validate('B_BridgeReportPage', result)
+        return with_focus_summary(validate('B_BridgeReportPage', result))
 
     async def location(self, args, **kwargs):
         binding, client = self.binding, self.client
@@ -140,7 +147,7 @@ class Integration:
             ('get_user_location', self.location, 'Request an authorized iPhone location only when this task needs it. Total wait at most 15 seconds.',
              {'max_age_seconds': {'type': 'integer', 'minimum': 0, 'maximum': 120},
               'timeout_seconds': {'type': 'number', 'exclusiveMinimum': 0, 'maximum': 15}}, []),
-            ('execute_gtd_confirmation', self.confirmation, 'Execute only this run\'s gateway-authorized confirmation; never supply changes.',
+            ('execute_gtd_confirmation', self.confirmation, 'Execute only this run\'s gateway-authorized inbox/review confirmation; agenda focus is gateway-only. Never supply changes.',
              {'confirmation_id': {'type': 'string', 'format': 'uuid'}}, ['confirmation_id']),
         ]
         for name, handler, description, properties, required in definitions:
