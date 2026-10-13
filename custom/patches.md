@@ -65,6 +65,12 @@ Ollo 网关（Ollo 仓库的 `server/`）在 2026-10-10 上线，App 改为只�
 
 v0.21.6 起，按闲置和每日定时自动重置会话要装插件 `hermes-session-reset-policy`，否则只在 `/new`、`/reset` 时重置。这个机制只作用于 iMessage 这类消息渠道，Ollo 走的 API 会话本来就不受它管。2026-10-11 起不再使用 iMessage，决定不装。同日从 `~/.hermes/config.yaml` 删掉了 `session_reset` 块（`mode: both`、`idle_minutes: 1440`、`at_hour: 4`），网关启动不再提示；删除前的配置备份在 `~/.hermes/backups/cleanup-20261011/config.yaml.pre-session-reset`。
 
+### 时区：`timezone: Asia/Shanghai`（2026-10-12 起）
+
+`~/.hermes/config.yaml` 里的 `timezone: Asia/Shanghai` 是 ollo-bridge 依赖的配置。bridge 的 wake 要求 `cron.get_timezone()` 明确是 Asia/Shanghai；没有这一行时它返回 None（跟随本机时区），Ollo 里点「我醒了」一律返回 `503/not_configured`。2026-10-12 首次真机测试因此失败，加上这一行并重启网关后修复。本机原本就是 +08:00，加入前后所有任务的 `next_run_at` 逐条一致，实际时间不变；这个值也会作为 `TZ` 传给工具子进程。加入前的配置备份在 `~/.hermes/backups/pre-timezone-202610121338/config.yaml`。
+
+ollo-bridge 下线，或者 bridge 不再检查时区之后，才可以删掉。
+
 ## 已移除
 
 | 原提交（最后的 SHA） | 内容 | 移除日期 | 原因 |

@@ -235,3 +235,21 @@ N3 修改与新增测试尚待设计会话沙箱外复测；上述 286/0 和 148
 设计会话通过 `scripts/run_tests.sh hermes-plugins/` 回传 **399 passed、2 failed**；已核对 `fork-plugins-D14.log`。两个失败分别是日期测试的 stdlib-formats/no-formats 参数，均因将 `GTDConfirmation.changes[2].alarm` 改为纯日期后未抛 BridgeError。该元素是 `op=create_reminder`：源合同 `openapi.yaml` 的 `GTDConfirmedChange → GTDChange.oneOf[create_reminder].properties.alarm` 明确定义为 `anyOf: [GTDDate, null]`；GTDDate 又是 ISODate/ISODateTime 的 oneOf。离线 schema 与此一致，合法纯日期应通过；这是测试把 alarm 错当 ISODateTime，不是 A6 合同遗漏。
 
 本轮只修测试与本记录。公共确认样例增加 `update_event`，将 timestamp_path 改为 `changes[3].start`，其合同为 ISODateTime，继续断言纯日期和无时区时间均拒绝。新增 alarm 正反例，在两种无 date-time 检查器配置下同时验证整包与派生 schema：纯日期、带时区的分钟/小数秒时间、null 和省略均通过；无时区分钟/秒时间及非法日历日期拒绝。未修改 Ollo 合同、离线 schema、生产校验器或 helper，也未删除原有拒绝断言。Python AST 与差异空白检查通过；按约定未在沙箱内运行测试，399/2 是本次修正前的外部结果，修正后待复测。暂存区、禁止编辑文档及其他既有改动保持不变；未提交、推送、部署或访问运行 home。
+
+### D16（2026-10-13）：A7 重点读回与停用 agenda 写入确认
+
+依据 Ollo `server/qa/report-focus-a7-c14-2026-10-13.md`、两份源合同及网关 `storage/inbox.py`、`core/inbox.py`、`core/confirmation.py` 同步。既有导出脚本重生成 schema，共 **102 个定义、196 处本地引用**；公共 Report、BridgeReport/Page 内的 report、BridgeContextReport 支持可选 `focus_confirmed: {item_ids, confirmed_at} | null`，新增的 FocusConfirmed 包含在各入口派生引用闭包中。保留 A6 日期规则和 GTDConfirmation 的旧 agenda 解码形状；无新增依赖、无宿主补丁。同步两份 A7 合成 fixtures，当前共 44 份；源文件 SHA-256 见 contracts/README。
+
+**旧版兼容与部署顺序：** 核对当前修改前的 A6 schema，Report/BridgeContextReport 均为 additionalProperties=false 且没有 focus_confirmed；网关 A7 序列化始终带该字段（未确认为 null）。因此若已部署 bridge 仍使用该 schema，报告详情/列表工具将报 invalid_request，pre_llm_call 的 context 校验失败后显示“摘要暂不可用”，items/interpret 的报告预读取同样受阻；不需要用户先确认重点就会触发。新 bridge 接受字段缺失/null，可先于网关部署。建议先 bridge、后网关，切换前等待旧 agenda 在途 run 结束；没有读取已部署版本或操作服务，本结论是源码兼容性核对。报告投递回执结构未改，不能把读取失败等同于投递失败。
+
+**给模型的重点资料：** 新增 `focus.py`，get_gtd_reports 在校验网关详情/列表后，按最新 focus_confirmed 选择增加工具专属 focus_summary，不修改 HTTP 合同或完整 report/raw_body/originals。完整 agenda.date 等于上海当天时显示“今天已确认的重点：…”，其他日期明确标出日期；确认时间不是报告日期，不能拿 confirmed_at 将历史选择沿用到今天。摘要优先显示选中事项标题（最多 80 字后省略），原始长标题完整保留；缺标题用原 ID。字段缺失/null 不产生摘要，不从 preselected/raw_body/旧确认推断选择，不增加请求、缓存或 Apple 调用。
+
+pre_llm_call 保留原报告/位置 JSON 和预算规则，追加该报告的重点摘要。A7 context 没有独立日期和标题映射，即使正文被截短仍保留原 focus_confirmed；这里只显示所属报告/事项 ID，并提示读完整报告核对日期，不自行宣称为今天、不解析旧正文来猜测。身份注入同时明确重点仅为网关记忆，不授权提醒事项改动；仍只追加本轮资料，不修改历史消息或中途换工具集。
+
+**agenda 确认：** Schedule.confirm 完成文档和可信 confirmation_id/run_id 校验后、检查依赖组和领取任何许可之前，拒绝 kind=agenda，返回 **400/invalid_request/retryable=false**。若网关 GET 已返回同样错误，沿用既有错误映射透传；工具输出 error，不伪造 GTDResult，不把旧 update due 转为 focus PUT 或 Apple 写入。inbox/review 的领取、执行、回执与重放行为不变；未修改已经签发许可的 finish 路径。
+
+**候选文档：** 仓库内 gtd 差异候选与 name=hermes-plus-gtd 的 Skill 正文都明确“确认重点只由网关记住，不改提醒事项”，取消所有 agenda 走 execute_gtd_confirmation 的宽泛表述，不将重点确认转成设今天到期、顺延超期或移动清单。两段今日安排 cron 候选同步这一边界。inbox/review 修改仍走卡片许可，用户普通对话直接请求仍按既有“列出确切变更→对话明确确认→Apple Skill”流程；没有扩大写入权限限制。未访问或修改已安装 Skill、真实任务。
+
+**测试已补，未运行：** `test_focus.py` 覆盖字段缺失/null/已确认、公共/bridge/派生 schema、Unix 秒/唯一 ID/数量/非法结构及 failure 不携带重点；真实临时会话 Binding、HTTP 替身和工具包装验证详情/列表摘要、同 sequence 最新选择、preselected 不授权、上海跨日与历史日期、完整原值不变、截短 context 仍带重点、items 只读预检。确认测试使用可信 run/UUID 绑定，分别覆盖网关直接 400 和旧 agenda 文档 200 后 bridge 拒绝，断言精确错误、无 claim/finish/Apple 调用；既有确认回执/重放测试增加 review 参数，保留 inbox。Python 测试、collect-only、模型/Apple/服务联调均未运行，交设计会话沙箱外 runner 复测；Ollo QA 的 1706 passed 不作为本插件测试结果。
+
+本轮静态验证：**37 个 Python 文件 AST、45 份 JSON、196 处本地引用解析、A7 重导出逐字一致、git diff --check** 通过。Swift/helper 未改，未重复 typecheck 或运行 helper。只在 custom 工作；暂存区、三个禁止编辑文件、依赖与既有源码边界未动，另一会话预先修改的 custom/patches.md 和插件 README 原样保留。未访问运行 home/密钥，未部署、重启、提交或推送。
