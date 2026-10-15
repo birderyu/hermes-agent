@@ -12,7 +12,7 @@
 | --- | --- |
 | `plugin.yaml`、`__init__.py`、`integration.py` | 注册两个平台名、三个工具、独立 HTTP handlers、发现接口与 hooks |
 | `config.py`、`protocol.py`、`http_client.py` | Profile 配置、离线严格 schema/字节/日期校验、回环 HTTP 与截止时间 |
-| `identity.py`、`run_context.py` | API 会话/压缩续接验证、回合能力、宿主工具身份、可信请求 UUID 与 run 查询导出、确认回合工具拦截 |
+| `identity.py`、`authority_identity.py`、`run_context.py` | API 会话/压缩续接验证、canonical/legacy 回合身份、可信请求 UUID 与 run 查询导出、确认回合工具拦截 |
 | `reports.py`、`execution.py`、`location.py` | 精确 cron 外壳移除、可信日期、报告投递、最多 15 秒位置轮询 |
 | `schedule.py` | wake/capture/capture lookup/items/interpret、claim/finish、确认分组与真实回执 |
 | `wake.py`、`cron_lock.py` | 在宿主任务锁中检查暂停、持久 wake 意图与当日去重 |
@@ -41,7 +41,11 @@ D2 候选共保留一项通用核心补丁，A4/A5 均未扩大：`cron/delivery
 - `execution.py` 按现有一行补丁透传的 execution_id 精确查 `cron.executions.get_execution()`，取 started_at/scheduled_instant。wake 已在调度锁内把网关 operation_id、业务日期和 manual_run_at 记入 job；进程内与外部 worker 均在首次发送前入原队列，投递只读同 execution/job 的不可变快照，精确匹配 manual_run_at。即使次日才开始或后来 wake 修改 jobs.json，仍保留原 trigger_id/业务日期；固定调度不继承旧 trigger。缺失执行账本或队列快照均拒绝投递，不以开始/到达时间补造 wake 身份。只把 UUID 规范化用于 wire，宿主账本查询仍用原始 ID。
 - 快照只在 pending/delivering 的投递生命周期保留；bridge 在 adapter 发送时读取，此时队列仍是 delivering。成功返回后，宿主 `_finish` 清空终态的 job_json/content，之后只用于结果查询/幂等去重，不能当历史任务快照读取。相同 execution 再次进入宿主投递会直接命中终态，不再调用 adapter；不为 bridge 延长敏感载荷的保存期限。
 - 失败类型取原队列独立的 `for_failure` 列，输出 `delivery_kind: failure/report`；不读模型正文、adapter metadata 或 job 中同名字段。Hermes 正常失败/崩溃通知经 `_deliver_result(for_failure=True)` 进入该列；现有 metadata 没有这个标志，但无需新增宿主传参。A4 在网关侧把 failure 保存为纯通知，不解析 GTD、不占用 agenda 日唯一键；实际服务联调仍待完成。上述进程内路径要求单目标 Ollo、无附件、非 relay；缺队列的直接 adapter 调用不会假报成功。
-- `identity.py` 读取 API worker 已绑定的 `tools.approval_context._approval_session_key`（值就是 run_id），绕开公共 getter 的环境变量 fallback；通过 `_active_run_agents[run_id]` 核对当前 session/task/turn，仍要求 API root/压缩续接与 Profile 校验、排除委派。确认向网关发送 **实际 run_id 作为 X-Ollo-Task-ID/runtime.task_id**，不能把会话级 task_id 当 run。缺少可信前置 hook 状态时，在 Ollo 会话（或会话存储不可判定）中拒绝本次 API run 的工具调用；正常的其他会话不受影响。以上私有宿主接口需在升级时回归，已删除额外 run ContextVar 核心补丁。
+- v0.22.1 canonical 路径：`authority_identity.py` 要求宿主 `api_execution` 指向同一 adapter，当前 home 的 authority 正在执行，并核对执行 epoch/generation、该 generation 接管的活 agent 和精确 session/task/turn。再从同一 admission 读取 `request_id`：宿主 POST run 将自己生成的 run_id 存在这里，同时核对 admission 的 API owner scope。approval ContextVar 在此路径只是会话路由，**不能用作 run_id**。结束后 executing 标记清除，旧 agent/旧上下文即使仍存在也没有身份。
+- authority 为 None 的 legacy 路径保留 approval ContextVar → `_active_run_agents[run_id]` → 精确 session/task/turn 的校验，绕开环境变量 fallback。两条路径都要求 Ollo root/压缩续接、相同 Profile、API 平台且非委派；确认发送 **实际 run_id 作为 X-Ollo-Task-ID/runtime.task_id**。正常网关先初始化 authority 再开放 API（`gateway/run_bootstrap.py:717`、`:773`）；无 runner 的独立 legacy adapter 仍可读取自身 SessionDB。人为构造或故障下有 runner、无当前 authority 时，谱系无法证明，保持拒绝 Ollo 身份。以上私有宿主接口需随升级回归，无新增核心补丁。
+- `pre_tool_call` 是全进程 hook。缺少前置上下文且谱系属于 Ollo 或无法判定时，只有宿主证明是本 adapter 的 API 执行才拦截通用工具：canonical 要求 `api_execution.adapter is adapter`，legacy 要求 approval ContextVar 指向本 adapter 的活 agent。存储缺失或 SQLite 错误不会阻断 cron、其他平台或其他 adapter 的通用工具；Ollo 专用工具仍必须有可信回合上下文。
+- 请求 UUID 只来自通过宿主认证的单个 `Idempotency-Key`。canonical FIFO 可能在 HTTP admission 返回前开始执行，所以中间件为新请求短暂保留 owner/UUID/宿主请求指纹，仅在宿主幂等 store 已将它绑定到当前 run 时提供 UUID；handler 返回后沿用 active task 的内存登记，结束撤销。既有 key 的重放不新建许可，请求退出清除 pending，重启不从持久化 key 恢复确认许可。正文中的标记只收紧工具范围，不能签发身份。
+- canonical GET run 状态的 session_id 是逻辑 FIFO 根会话，中间件在原认证/owner 检查后解析压缩续接，导出与工具一致的实际 session_id 和 `task_id=run_id`；否则有压缩历史的确认仍会被 Ollo 网关拒绝。读取或解析数据库失败（包括谱系检查成功后数据库变为 None、SQLite/OSError）时保留宿主原响应，不部分改写，也不因插件投影返回 500。
 
 Telegram 话题路由及原 relay 测试已恢复，未搬移。相关记录见 [fork 修订记录](../../custom/records/2026-10-11-ollo-bridge.md)。
 
@@ -128,7 +132,7 @@ plugins:
 | `get_user_location` | 模型只给 max_age/timeout；runtime_call_id 由宿主 ID 摘要生成，POST 一次、短轮询，总截止 ≤15 秒且不续期；本批只接受 iPhone 结果，坐标时间最多领先本地时钟 10 秒（含边界） |
 | `execute_gtd_confirmation` | 模型只给 confirmation_id；确认必须绑定当前真实 API run。GET 授权后逐组 claim，取网关原始 changes/originals，helper 执行后 finish，只有持久收到 accepted 才返回 done |
 
-本插件的三个工具需可信 `pre_llm_call` 回合 + 相同 Profile + api_server root/压缩续接；分支、reset、委派、其他渠道不行。报告卡片确认标记回合通过宿主 `pre_tool_call` 和 `tool_execution` middleware 限制其他工具，包括 terminal/execute_code/委派；即使 pre hook 超时，API run 原始输入仍使其他工具被拦截。工具参数中的伪造 session/task/run/changes 均拒绝。
+本插件的三个工具需可信 `pre_llm_call` 回合 + 相同 Profile + api_server root/压缩续接；分支、reset、委派、其他渠道不行。报告卡片确认标记回合通过宿主 `pre_tool_call` 和 `tool_execution` middleware 限制其他工具，包括 terminal/execute_code/委派；即使 pre hook 缺失，活跃 Ollo API 回合也保守拒绝工具调用。工具参数中的伪造 session/task/run/changes 均拒绝。
 
 写入授权按来源区分：定时报告提出的建议必须经 Ollo 卡片确认，由 `execute_gtd_confirmation` 执行，普通文字“确认”不授权这类修改；用户在普通 Ollo 对话里直接提出修改请求，仍先列出确切变更、取得对话明确确认，再用 `apple-reminders` / `apple-calendar` Skill 执行。后者不要求卡片确认 ID，也不套用报告生成模型的空工具集。既有运行时仅对卡片确认标记回合施加该工具限制（异常缺少可信回合状态时仍按原规则拒绝执行）；D13 不改代码。
 
@@ -225,9 +229,11 @@ python scripts/check --base v0.21.6
 发布前必须核实：
 
 - **网关 run 映射**：已读 C 的 `authorize_runtime`，并由插件 middleware 在原宿主 GET run 认证通过后导出 `task_id=run_id`、实际 session_id；工具发送相同 `X-Ollo-Task-ID/runtime.task_id`。宿主终端 task alias 不变；需沙箱外通过真实 POST/GET run 的测试及 B/C 联测。普通 `/v1/chat/completions` 无此 run 身份，本插件拒绝其确认执行。
-- **确认 ID 告知模型**：C 原样转发 `Idempotency-Key=client_message_id`；插件仅将通过宿主认证的新接受请求按 run_id 绑定 UUID，worker 以宿主 run/owner/agent 身份查询，hook 注入可信 confirmation_id，工具代码强制与之相等，最后核对网关返回的 run_id。任务结束即撤销，不对幂等重放重新授权，不从正文/历史或“最新确认”选 ID。v0.21.6 在创建后台 task 后无 await 即返回；插件在同一事件循环 tick 内登记，升级需保留端到端测试验证此时序。
+- **确认 ID 告知模型**：C 原样转发 `Idempotency-Key=client_message_id`；插件按上文 canonical/legacy 宿主身份查询 UUID，hook 注入可信 confirmation_id，工具强制与之相等，并核对网关返回的 run_id。v0.22.1 不依赖 handler 返回早于模型的时序；新测试强制 canonical 执行先于 HTTP 返回，确认仍能取得精确 UUID。完成、取消或恢复后的旧请求不会通过重放重新授权，不从正文/历史或“最新确认”选 ID。
 - **运行前去重**：此基线没有可靠的 cron pre-run veto，bridge 不用提示词假装阻止模型调用；允许重复只读生成，依赖网关每日事务唯一键防重复报告/推送。
 - **失败通知联调**：替身验证 for_failure → 队列列 → delivery_kind 及原样重试；尚未验证真实网关 failure 落库后不置 agenda generated、固定兜底仍可成功。D12 只读设计会话提供的任务配置快照，部署窗口仍须核对 failure_deliver 和单目标/无附件条件。
 - **D12 采集**：已读设计会话提供的真实任务/Skill 快照，非运行目录。新增脚本安装、Profile 路径、范围/超时/零项/500 项、名称双向映射与确认原值测试，待沙箱外跑；Swift typecheck 与静态检查通过。采集失败不会自动成为 for_failure，跨日 wake 的采集窗口也没有原业务日期输入，不能据此声称失败兜底和跨日展示已完成联调。
 - **宿主真实挂接**：新 schema 列、队列恢复、既有 approval ContextVar 与 active agent 的跨 hook/工具线程核对、Profile scope、helper 签名与权限，均需沙箱外测试及候选环境确认；静态检查不能替代。
 - **原生约束**：重现日程/提醒、重复外部 ID、同名清单等会明确拒绝受限写入；EventKit/iCloud 在预检后仍可能并发变化，不提供跨设备 CAS 或自动回滚。
+
+2026-10-15 的 v0.22.1 身份适配及完整证据见 [session authority 修订记录](../../custom/records/2026-10-15-ollo-bridge-session-authority.md)。设计复核后插件全量 **525 passed / 0 failed / 14 skipped**；新增 canonical 测试用真实初始化、APIServerAdapter、TurnRunner、AIAgent 与注册的 hook/middleware，模型、Apple 和对端 HTTP 为替身。无 socket 的真实 aiohttp router 版本 11 项通过，TestClient/TestServer 版本 11 项因沙箱禁止监听而跳过，另 3 项为既有位置测试跳过。旧 legacy 8 项与新增存储故障/执行归属/GET 保留原响应的 13 项均通过；真实 loopback、网关重启及手机链路仍须沙箱外验收。safe worker 按宿主设计不加载插件，不属于 Ollo 的支持执行路径。

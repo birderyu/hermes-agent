@@ -6,6 +6,7 @@ import sqlite3
 
 from .protocol import BridgeError, dumps, require, validate
 from .run_context import RunRequests
+from .authority_identity import current_claim, claim_run_id
 
 CALL = ContextVar('ollo_bridge_tool_call', default=None)
 CONFIRM_MARKER = 'hermes-plus-gtd-confirm'
@@ -63,10 +64,14 @@ class Binding:
         from hermes_constants import get_hermes_home
         from agent.delegation_context import is_delegated_child_context
         from tools.approval_context import _approval_session_key
+        from gateway.session_authorities import active_authority
         if (not self.config or not self.adapter or get_hermes_home() != self.home
-                or is_delegated_child_context() or not task_id or not turn_id):
+                or is_delegated_child_context() or not task_id or not turn_id
+                or self.bound(session_id) is not True):
             return None
-        # API workers already bind run_id here. Bypass the public getter's
+        if active_authority(self.adapter.gateway_runner) is not None:
+            return claim_run_id(current_claim(self.adapter, self.home, session_id, task_id, turn_id), self.adapter)
+        # Legacy API workers bind run_id here. Bypass the public getter's
         # environment fallback, then require this exact live agent/turn.
         run_id = _approval_session_key.get()
         agent = self.adapter._active_run_agents.get(run_id)
@@ -76,12 +81,24 @@ class Binding:
             return run_id
         return None
 
+    def owns_api_execution(self):
+        """Host execution ownership remains readable even when lineage storage fails."""
+        from gateway.session_api_turn import api_execution
+        from tools.approval_context import _approval_session_key
+        if self.adapter is None:
+            return False
+        api = api_execution.get()
+        if api is not None:
+            return api.get('adapter') is self.adapter
+        return self.adapter._active_run_agents.get(_approval_session_key.get()) is not None
+
     def guard(self, tool_name='', session_id=None, task_id='', turn_id='', **kwargs):
         state = self.state(session_id, task_id, turn_id)
         # If the hook/store failed, we cannot know whether this is a confirmation
-        # turn. Fail closed for the active bound API run, including generic tools.
-        if (not state and self.current_run_id(session_id, task_id, turn_id)
-                and self.bound(session_id) is not False):
+        # turn. Only this adapter's API execution may restrict generic tools;
+        # the global hook must leave cron and other platforms alone.
+        bound = self.bound(session_id)
+        if not state and bound is not False and self.owns_api_execution():
             return {'action': 'block', 'message': '缺少可信的 Ollo 回合上下文，不能执行工具。'}
         if state and state['restricted'] and tool_name != 'execute_gtd_confirmation':
             return {'action': 'block', 'message': '此确认回合只能调用 execute_gtd_confirmation；不能绕过执行许可。'}
