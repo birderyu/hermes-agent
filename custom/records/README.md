@@ -24,7 +24,8 @@
 | 2026-10-11 | [Ollo bridge 源码与宿主挂接](2026-10-11-ollo-bridge.md) | 已提交 `1bbb986596`、`14f2be2480`；插件 391/0、cron 1485 过/11 既有跳过；六轮跨仓库对账无阻塞项 |
 | 2026-10-11 | [部署 ollo-bridge](2026-10-11-ollo-bridge-deploy.md) | 运行目录到 `23cc01830d`（含撤回 Photon 补丁）；停用三个旧 ollo 插件；4 个测试任务投 Ollo、只读「Ollo 测试·*」；真机联合验收待 App 0.1.0 (9) |
 | 2026-10-14 | [Ollo GTD 正式切换方案与工具](2026-10-14-ollo-gtd-production-switch.md) | 仅开发准备、待执行；真实四任务保持身份并改投 Ollo，测试任务/Skill 备份后删除；沙箱行为测试未能启动 |
-| 2026-10-15 | [EventKit 失败诊断与只读结构检查](2026-10-15-ollo-eventkit-diagnostics.md) | 未提交/未部署；prepare/commit 脱敏诊断、一次 WARNING、只读 inspect；完整 bridge 测试被沙箱阻止，待沙箱外验证 |
+| 2026-10-15 | [EventKit 失败诊断与只读结构检查](2026-10-15-ollo-eventkit-diagnostics.md) | 2026-10-15 已部署；prepare/commit 脱敏诊断、一次 WARNING、只读 inspect；沙箱外 bridge 测试通过 |
 | 2026-10-15 | [升级到 v0.22.1](2026-10-15-v0.22.1.md) | 丢掉 3 个 iMessage 补丁及撤回；2 个 cron 补丁保留；未发现可复现的 custom 新增回归；ollo-bridge 确认身份需适配新版 API 执行路径，部署待定 |
+| 2026-10-15 | [Ollo bridge 适配 session authority](2026-10-15-ollo-bridge-session-authority.md) | canonical 与 legacy 可信回合身份；复核收窄全局 hook 拦截、GET 失败保留原响应；沙箱外插件 539 过、核心 118 过；随 v0.22.1 部署 |
 
 新记录的文件名用 `YYYY-MM-DD-<主题>.md`，写清：做了什么、涉及哪些提交、冲突怎么解决、测试结果（含与官方基线的对照）、部署与验证、没验证到的地方。
