@@ -1,4 +1,4 @@
-// JSON stdin/stdout bridge. No permissions prompts unless explicitly run with --authorize.
+// JSON stdin/stdout bridge. Moves may prompt for Reminders Automation permission.
 // Compile only during development; running the helper accesses the user's EventKit store.
 import Foundation
 import EventKit
@@ -41,9 +41,12 @@ struct MutationContext {
 struct MutationFailure: Error {
     let outcome: String
     let diagnostic: [String: Any]
-    init(_ error: Error, phase: String, context: MutationContext) {
+    let reasonCode: String?
+    init(_ error: Error, phase: String, context: MutationContext,
+         outcome: String? = nil, reasonCode: String? = nil) {
         let error = error as NSError
-        outcome = phase == "prepare" ? "not_executed" : "unknown"
+        self.outcome = outcome ?? (phase == "prepare" ? "not_executed" : "unknown")
+        self.reasonCode = reasonCode
         var data: [String: Any] = ["phase": phase, "domain": error.domain, "code": error.code,
                                    "op": context.op, "fields": context.fields]
         // userInfo/description can embed reminder content. Only the immediate
@@ -54,7 +57,9 @@ struct MutationFailure: Error {
         diagnostic = data
     }
     var response: [String: Any] {
-        ["error": "EventKit operation unavailable", "outcome": outcome, "diagnostic": diagnostic]
+        var value: [String: Any] = ["error": "Apple operation unavailable", "outcome": outcome, "diagnostic": diagnostic]
+        if let reasonCode { value["reason_code"] = reasonCode }
+        return value
     }
 }
 
@@ -62,6 +67,7 @@ struct MutationFailure: Error {
 func commitChanges(context: () -> MutationContext = { MutationContext([]) },
                    prepare: () throws -> Void, commit: () throws -> Void, reset: () -> Void) throws {
     do { try prepare() }
+    catch let failure as MutationFailure { reset(); throw failure }
     catch {
         let failure = MutationFailure(error, phase: "prepare", context: context())
         reset(); throw failure
@@ -70,6 +76,225 @@ func commitChanges(context: () -> MutationContext = { MutationContext([]) },
     catch {
         let failure = MutationFailure(error, phase: "commit", context: context())
         reset(); throw failure
+    }
+}
+
+// In-process AppleScript keeps cancellation under the helper's kernel watchdog:
+// no osascript child can outlive HelperProcesses.kill/reap. Script parameters
+// are descriptors, never interpolated source, shell arguments, or log fields.
+protocol ReminderMoveRunner {
+    func move(reminderID: String, listID: String) throws
+}
+func checkedAppleID(_ value: String) throws -> String {
+    guard value.count == 36, UUID(uuidString: value) != nil else {
+        throw BridgeError(message: "Unsupported Apple identifier")
+    }
+    return value
+}
+struct AppleScriptMoveRunner: ReminderMoveRunner {
+    static let source = """
+    on moveReminder(reminderIdentifier, listIdentifier)
+        with timeout of 12 seconds
+            tell application "Reminders"
+                set selectedReminder to reminder id reminderIdentifier
+                move selectedReminder to list id listIdentifier
+            end tell
+        end timeout
+        return true
+    end moveReminder
+    """
+    func move(reminderID: String, listID: String) throws {
+        let reminderID = try checkedAppleID(reminderID), listID = try checkedAppleID(listID)
+        guard let script = NSAppleScript(source: Self.source) else {
+            throw NSError(domain: "OlloAppleScript", code: -1)
+        }
+        // 'ascr'/'psbr': call a handler in this script, which sends the move.
+        let event = NSAppleEventDescriptor(eventClass: 0x61736372, eventID: 0x70736272,
+            targetDescriptor: nil, returnID: -1, transactionID: 0)
+        event.setParam(NSAppleEventDescriptor(string: "movereminder"), forKeyword: 0x736E616D)
+        let parameters = NSAppleEventDescriptor.list()
+        parameters.insert(NSAppleEventDescriptor(string: "x-apple-reminder://" + reminderID), at: 1)
+        parameters.insert(NSAppleEventDescriptor(string: listID), at: 2)
+        event.setParam(parameters, forKeyword: 0x2D2D2D2D)
+        var error: NSDictionary?
+        _ = script.executeAppleEvent(event, error: &error)
+        if let error {
+            // Discard the localized error, offending object and script text here.
+            throw NSError(domain: "OlloAppleScript", code: (error[NSAppleScript.errorNumber] as? Int) ?? -1)
+        }
+    }
+}
+
+struct ReminderMove {
+    let reference: String
+    let identifier: String
+    let sourceList: String
+    let targetList: String
+    let title: String
+    let created: Date
+    let original: [String: Any]
+}
+struct MoveCandidate {
+    let identifier: String
+    let list: String
+    let title: String
+    let created: Date?
+    let completed: Bool
+    func matches(_ move: ReminderMove) -> Bool {
+        list == move.targetList && title == move.title && created == move.created && !completed
+    }
+}
+struct MoveObservation {
+    let oldExists: Bool
+    let oldUnchanged: Bool
+    let candidates: [MoveCandidate]
+    func replacement(_ move: ReminderMove) -> String? {
+        let matches = candidates.filter { $0.matches(move) }
+        guard !oldExists, matches.count == 1, matches[0].identifier != move.identifier else { return nil }
+        return matches[0].identifier
+    }
+    func unchanged(_ move: ReminderMove) -> Bool {
+        oldExists && oldUnchanged && !candidates.contains { $0.matches(move) }
+    }
+}
+func moveReason(_ error: Error) -> String {
+    switch (error as NSError).code {
+    case -1743: return "move_permission"
+    case -1712: return "move_timeout"
+    case -600: return "move_app_unavailable"
+    case -609: return "move_connection_lost"
+    default: return "move_failed"
+    }
+}
+
+// List assignment is planned separately. Collapsing repeated destinations for
+// one reminder preserves the final result; merge/to_event do not read its list.
+func moveTargets(_ changes: [[String: Any]]) -> [(String, String)] {
+    var order: [String] = [], targets: [String: String] = [:]
+    for change in changes where change["op"] as? String == "update" {
+        if let reference = change["item"] as? String, let list = change["list"] as? String {
+            if targets[reference] == nil { order.append(reference) }
+            targets[reference] = list
+        }
+    }
+    return order.map { ($0, targets[$0]!) }
+}
+func withoutList(_ change: [String: Any]) -> [String: Any] {
+    var change = effectiveChange(change)
+    if change["op"] as? String == "update" { change.removeValue(forKey: "list") }
+    return change
+}
+func resolveGroup<Item>(_ references: [String], replacements: [String: String],
+                        lookup: (String) throws -> Item?) throws -> [String: Item] {
+    var resolved: [String: Item] = [:]
+    for reference in references {
+        guard let item = try lookup(replacements[reference] ?? reference) else {
+            throw BridgeError(message: "Item changed during move")
+        }
+        resolved[reference] = item
+    }
+    return resolved
+}
+func stageGroup<Item>(_ changes: [[String: Any]], resolved: [String: Item],
+                      stage: ([String: Any], [String: Item]) throws -> Void) throws {
+    var resolved = resolved
+    for change in changes {
+        do { try stage(withoutList(change), resolved) }
+        catch { throw MutationFailure(error, phase: "prepare", context: MutationContext([change])) }
+        if ["delete", "merge", "to_event"].contains(change["op"] as? String ?? ""),
+           let id = change["item"] as? String { resolved.removeValue(forKey: id) }
+    }
+}
+func hasListUpdate(_ changes: [[String: Any]]) -> Bool { !moveTargets(changes).isEmpty }
+func helperWatchdog(_ request: [String: Any]) -> UInt32 {
+    request["method"] as? String == "apply" && hasListUpdate(request["changes"] as? [[String: Any]] ?? []) ? 55 : 7
+}
+
+// Poll only reads, never re-send move. An error reply can arrive after Reminders
+// performed the move; success needs a unique new ID AND absence of the old ID.
+func reconcileMove(_ move: ReminderMove, error: Error?, context: MutationContext,
+                   observe: (ReminderMove, Double) throws -> MoveObservation,
+                   now: () -> Double, pause: (Double) -> Void) throws -> String {
+    let deadline = now() + 5
+    var last: MoveObservation?
+    repeat {
+        do {
+            let reading = try observe(move, max(0.01, deadline - now()))
+            last = reading
+            if let replacement = reading.replacement(move) { return replacement }
+        } catch {
+            last = nil // A failed latest read cannot establish absence.
+        }
+        let remaining = deadline - now()
+        if remaining > 0 { pause(min(0.2, remaining)) }
+    } while now() < deadline
+    let unchanged = error != nil && last?.unchanged(move) == true
+    // Apple explicitly does not cancel an application command on timeout.
+    // Even a readable old object cannot prove that a queued move will not land.
+    let pending = error.map { [-1712, -609].contains(($0 as NSError).code) } ?? false
+    throw MutationFailure(error ?? NSError(domain: "OlloMoveReconciliation", code: 1),
+        phase: "reconcile", context: context, outcome: unchanged && !pending ? "not_executed" : "unknown",
+        reasonCode: unchanged ? moveReason(error!) : "move_unresolved")
+}
+
+// The current contract has no partial group state. Once a move succeeds, every
+// subsequent failure is a retained unknown receipt, never retryable rollback.
+func applyWithMoves(_ moves: [ReminderMove], runner: ReminderMoveRunner, context: MutationContext,
+                    observe: (ReminderMove, Double) throws -> MoveObservation,
+                    prepare: ([String: String]) throws -> Void,
+                    commit: () throws -> Void, reset: () -> Void,
+                    now: () -> Double = { ProcessInfo.processInfo.systemUptime },
+                    pause: (Double) -> Void = { Thread.sleep(forTimeInterval: $0) }) throws -> [String: String] {
+    if moves.isEmpty {
+        try commitChanges(context: { context }, prepare: { try prepare([:]) }, commit: commit, reset: reset)
+        return [:]
+    }
+    let deadline = now() + 48
+    var replacements: [String: String] = [:]
+    var phase = "prepare"
+    do {
+        // Validate the entire dependency group using commit:false, then discard
+        // it. Nothing staged may survive a reset/re-read during external moves.
+        try prepare([:]); reset()
+        for move in moves {
+            phase = "move"
+            guard deadline - now() >= 27 else {
+                throw MutationFailure(NSError(domain: "OlloMoveBudget", code: 1), phase: phase,
+                    context: context, outcome: "not_executed", reasonCode: "move_budget")
+            }
+            let baseline = try observe(move, 5)
+            guard baseline.unchanged(move) else {
+                throw MutationFailure(NSError(domain: "OlloMoveReconciliation", code: 2), phase: "reconcile",
+                    context: context, outcome: "not_executed", reasonCode: "move_precondition")
+            }
+            var scriptError: Error?
+            do { try runner.move(reminderID: move.identifier, listID: move.targetList) }
+            catch { scriptError = error }
+            // Permission denial is a definite rejection before the move event.
+            if let error = scriptError, (error as NSError).code == -1743 {
+                throw MutationFailure(error, phase: phase, context: context,
+                    outcome: "not_executed", reasonCode: "move_permission")
+            }
+            phase = "reconcile"
+            replacements[move.reference] = try reconcileMove(move, error: scriptError, context: context,
+                                                            observe: observe, now: now, pause: pause)
+        }
+        phase = "prepare"
+        try prepare(replacements)
+        phase = "commit"
+        try commit()
+        return replacements
+    } catch let failure as MutationFailure {
+        reset()
+        if replacements.isEmpty { throw failure }
+        throw MutationFailure(NSError(domain: failure.diagnostic["domain"] as? String ?? "OlloMove", code: failure.diagnostic["code"] as? Int ?? 1),
+            phase: failure.diagnostic["phase"] as? String ?? phase, context: context,
+            outcome: "unknown", reasonCode: "move_partial")
+    } catch {
+        reset()
+        throw MutationFailure(error, phase: phase, context: context,
+            outcome: replacements.isEmpty && phase != "commit" ? "not_executed" : "unknown",
+            reasonCode: replacements.isEmpty ? "move_failed" : "move_partial")
     }
 }
 
@@ -272,7 +497,10 @@ func inspectReminders(_ request: [String: Any], lookup: (String) throws -> Remin
 final class Bridge {
     let store: EKEventStore
     let names: AppleNames
-    init(_ store: EKEventStore, names: AppleNames) { self.store = store; self.names = names }
+    let moveRunner: ReminderMoveRunner
+    init(_ store: EKEventStore, names: AppleNames, moveRunner: ReminderMoveRunner = AppleScriptMoveRunner()) {
+        self.store = store; self.names = names; self.moveRunner = moveRunner
+    }
     func lookup(_ id: String) throws -> EKCalendarItem? {
         let matches = store.calendarItems(withExternalIdentifier: id)
         guard matches.count <= 1 else { throw BridgeError(message: "Ambiguous external identifier") }
@@ -329,7 +557,9 @@ final class Bridge {
     func update(_ change: [String: Any], _ item: EKCalendarItem?) throws {
         let item = try reminder(item)
         if let title = change["title"] { item.title = try string(title) }
-        if let list = change["list"] { item.calendar = try destination(list, .reminder) }
+        if let list = change["list"], try destination(list, .reminder).calendarIdentifier != item.calendar.calendarIdentifier {
+            throw BridgeError(message: "List change requires move")
+        }
         if let due = change["due"] { item.dueDateComponents = try components(due) }
         if let person = change["waiting_for"] {
             var lines = (item.notes ?? "").components(separatedBy: "\n").filter { !$0.hasPrefix("[Ollo 等待] ") }
@@ -371,6 +601,61 @@ final class Bridge {
         item.startDate = try parseDate(change["start"]); item.endDate = item.startDate.addingTimeInterval(seconds)
         try store.save(item, span: .thisEvent, commit: false)
     }
+    func planMoves(_ changes: [[String: Any]], _ resolved: [String: EKCalendarItem]) throws -> [ReminderMove] {
+        try moveTargets(changes).compactMap { reference, list in
+            let item = try reminder(resolved[reference]), target = try destination(list, .reminder)
+            guard item.calendar.calendarIdentifier != target.calendarIdentifier else { return nil }
+            // Only the identifier relationship verified with Reminders is supported.
+            guard stableID(item) == item.calendarItemIdentifier, let created = item.creationDate else {
+                throw BridgeError(message: "Unsupported move identity")
+            }
+            return ReminderMove(reference: reference, identifier: try checkedAppleID(item.calendarItemIdentifier),
+                sourceList: item.calendar.calendarIdentifier, targetList: try checkedAppleID(target.calendarIdentifier),
+                title: item.title ?? "", created: created, original: snapshot(reference, item))
+        }
+    }
+    func observeMove(_ move: ReminderMove, timeout: Double) throws -> MoveObservation {
+        store.reset()
+        guard permitted(.reminder), let target = store.calendar(withIdentifier: move.targetList) else {
+            throw BridgeError(message: "Move read unavailable")
+        }
+        var rows: [EKReminder]?
+        let done = DispatchSemaphore(value: 0)
+        let token = store.fetchReminders(matching: store.predicateForReminders(in: [target])) { values in
+            rows = values; done.signal()
+        }
+        guard done.wait(timeout: .now() + timeout) == .success, let rows, permitted(.reminder) else {
+            store.cancelFetchRequest(token)
+            throw BridgeError(message: "Move read unavailable")
+        }
+        let old = store.calendarItem(withIdentifier: move.identifier)
+        return MoveObservation(oldExists: old != nil,
+            oldUnchanged: old != nil && old?.calendar.calendarIdentifier == move.sourceList
+                && old?.creationDate == move.created
+                && matchesOriginal(move.original, snapshot(move.reference, old)),
+            candidates: rows.map { MoveCandidate(identifier: $0.calendarItemIdentifier, list: $0.calendar.calendarIdentifier,
+                                                title: $0.title ?? "", created: $0.creationDate, completed: $0.isCompleted) })
+    }
+    func prepareMovedGroup(_ changes: [[String: Any]], originals: [String: [String: Any]],
+                           moves: [ReminderMove], replacements: [String: String]) throws {
+        let resolved = try resolveGroup(Array(originals.keys), replacements: replacements, lookup: lookup)
+        for (reference, item) in resolved {
+            let original = originals[reference]!
+            var expected = original, live = snapshot(reference, item)
+            if let replacement = replacements[reference] {
+                guard let move = moves.first(where: { $0.reference == reference }),
+                      item.calendarItemIdentifier == replacement,
+                      item.calendar.calendarIdentifier == move.targetList, item.creationDate == move.created else {
+                    throw BridgeError(message: "Moved identity changed")
+                }
+                // List/modified_at are necessarily changed by move. All other
+                // snapshotted fields must still match before staging the group.
+                for key in ["list", "modified_at"] { expected.removeValue(forKey: key); live.removeValue(forKey: key) }
+            }
+            guard matchesOriginal(expected, live) else { throw BridgeError(message: "Item changed during move") }
+        }
+        try stageGroup(changes, resolved: resolved, stage: stage)
+    }
     func apply(_ request: [String: Any]) throws -> [String: Any] {
         guard let changes = request["changes"] as? [[String: Any]], !changes.isEmpty, changes.count <= 100,
               let expected = request["expected"] as? [String: [String: Any]] else {
@@ -392,22 +677,16 @@ final class Bridge {
             resolved[id] = item
         }
         let groupContext = MutationContext(changes)
-        var activeContext = groupContext
-        try commitChanges(context: { activeContext }, prepare: {
-            for raw in changes {
-                // v1: optional null means unchanged, never an implicit field clear.
-                let change = effectiveChange(raw)
-                activeContext = MutationContext([change])
-                try self.stage(change, resolved)
-                if ["delete", "merge", "to_event"].contains(change["op"] as? String ?? ""),
-                   let id = change["item"] as? String { resolved.removeValue(forKey: id) }
-            }
-        }, commit: {
-            activeContext = groupContext
-            try self.store.commit()
-        }, reset: { self.store.reset() })
+        let moves = try planMoves(changes, resolved)
+        // Keep full live snapshots (including notes) across external writes.
+        let originals = Dictionary(uniqueKeysWithValues: resolved.map { ($0.key, snapshot($0.key, $0.value)) })
+        _ = try applyWithMoves(moves, runner: moveRunner, context: groupContext,
+            observe: { try self.observeMove($0, timeout: $1) },
+            prepare: { try self.prepareMovedGroup(changes, originals: originals, moves: moves, replacements: $0) },
+            commit: { try self.store.commit() }, reset: { self.store.reset() })
         return ["status": "done"]
     }
+
     func stage(_ change: [String: Any], _ resolved: [String: EKCalendarItem]) throws {
         let op = try string(change["op"])
         let item = (change["item"] as? String).flatMap { resolved[$0] }
@@ -521,6 +800,182 @@ final class Bridge {
         return captureLookupResult("ollo://capture/" + id, rows: rows.map { ($0.url?.absoluteString, stableID($0)) },
                                    fullAccess: permitted(.reminder), complete: unchanged, checkedAt: Date())
     }
+}
+
+// This fixture has no EventKit objects, permission calls, Apple events or sleeps.
+final class MoveTestRunner: ReminderMoveRunner {
+    var calls: [(String, String)] = []
+    var action: (String, String) throws -> Void = { _, _ in }
+    func move(reminderID: String, listID: String) throws {
+        calls.append((reminderID, listID)); try action(reminderID, listID)
+    }
+}
+final class MoveFixture {
+    let runner = MoveTestRunner()
+    let move = ReminderMove(reference: "old", identifier: "old", sourceList: "source", targetList: "target",
+                            title: "PRIVATE_TITLE", created: Date(timeIntervalSince1970: 100), original: [:])
+    var time = 0.0, committed = false, moved = false, ambiguous = false, readFails = false
+    var prepared: [[String: String]] = [], pendingDue: String?, due: String?, resets = 0
+    var secondPrepareFails = false, commitFails = false
+    func observe(_ move: ReminderMove, _ timeout: Double) throws -> MoveObservation {
+        if readFails { throw BridgeError(message: "PRIVATE_READ_ERROR") }
+        let candidate = MoveCandidate(identifier: "new", list: move.targetList, title: move.title,
+                                      created: move.created, completed: false)
+        return MoveObservation(oldExists: !moved, oldUnchanged: !moved,
+                               candidates: moved ? (ambiguous ? [candidate, candidate] : [candidate]) : [])
+    }
+    func run(moves: [ReminderMove]? = nil) throws -> [String: String] {
+        try applyWithMoves(moves ?? [move], runner: runner, context: MutationContext([["op": "update", "list": "工作", "due": "2030-01-01"]]),
+            observe: observe, prepare: { aliases in
+                self.prepared.append(aliases)
+                if self.prepared.count > 1 {
+                    precondition(self.moved && aliases["old"] == "new" && self.due == nil)
+                    if self.secondPrepareFails { throw BridgeError(message: "PRIVATE_STAGE_ERROR") }
+                }
+                self.pendingDue = "2030-01-01"
+            }, commit: {
+                if self.commitFails { throw NSError(domain: "EKErrorDomain", code: 1) }
+                self.due = self.pendingDue; self.committed = true
+            }, reset: { self.resets += 1; self.pendingDue = nil },
+            now: { self.time }, pause: { self.time += $0 })
+    }
+}
+func testReminderMoves() throws {
+    let successful = MoveFixture()
+    successful.runner.action = { _, _ in successful.moved = true }
+    let aliases = try successful.run()
+    precondition(aliases == ["old": "new"] && successful.due == "2030-01-01")
+    precondition(successful.prepared == [[:], ["old": "new"]] && successful.resets == 1)
+    precondition(successful.runner.calls.count == 1 && successful.runner.calls[0].1 == "target")
+
+    for code in [-1743, -1712, -600, -609] {
+        let fixture = MoveFixture()
+        fixture.runner.action = { _, _ in throw NSError(domain: "OlloAppleScript", code: code,
+                                                       userInfo: [NSLocalizedDescriptionKey: "PRIVATE_ERROR"]) }
+        do { _ = try fixture.run(); preconditionFailure("Move error must throw") }
+        catch let failure as MutationFailure {
+            precondition(failure.outcome == ([-1712, -609].contains(code) ? "unknown" : "not_executed"))
+            precondition(!fixture.moved && fixture.due == nil && !fixture.committed)
+            precondition(failure.reasonCode == moveReason(NSError(domain: "OlloAppleScript", code: code)))
+            let wire = String(data: try encodedJSON(failure.response), encoding: .utf8)!
+            precondition(!wire.contains("PRIVATE") && !wire.contains("old") && !wire.contains("target"))
+        }
+    }
+    // A timeout/connection error after mutation is recovered, not retried.
+    for code in [-1712, -609] {
+        let fixture = MoveFixture()
+        fixture.runner.action = { _, _ in
+            fixture.moved = true; throw NSError(domain: "OlloAppleScript", code: code)
+        }
+        _ = try fixture.run()
+        precondition(fixture.committed && fixture.runner.calls.count == 1 && fixture.due == "2030-01-01")
+    }
+    for mode in ["ambiguous", "read", "stage", "commit"] {
+        let fixture = MoveFixture()
+        fixture.runner.action = { _, _ in
+            fixture.moved = true
+            fixture.ambiguous = mode == "ambiguous"; fixture.readFails = mode == "read"
+        }
+        fixture.secondPrepareFails = mode == "stage"; fixture.commitFails = mode == "commit"
+        do { _ = try fixture.run(); preconditionFailure("Uncertain/partial move must throw") }
+        catch let failure as MutationFailure {
+            precondition(failure.outcome == "unknown" && fixture.due == nil && !fixture.committed)
+            precondition(failure.reasonCode == (["stage", "commit"].contains(mode) ? "move_partial" : "move_unresolved"))
+        }
+    }
+    // Re-read races: old still exists, wrong title/date/list/completion, or no
+    // candidate cannot identify a moved object, even after a success reply.
+    let sample = successful.move
+    let valid = MoveCandidate(identifier: "new", list: "target", title: sample.title, created: sample.created, completed: false)
+    precondition(MoveObservation(oldExists: true, oldUnchanged: true, candidates: [valid]).replacement(sample) == nil)
+    for row in [MoveCandidate(identifier: "new", list: "elsewhere", title: sample.title, created: sample.created, completed: false),
+                MoveCandidate(identifier: "new", list: "target", title: "other", created: sample.created, completed: false),
+                MoveCandidate(identifier: "new", list: "target", title: sample.title, created: nil, completed: false),
+                MoveCandidate(identifier: "new", list: "target", title: sample.title, created: sample.created, completed: true)] {
+        precondition(MoveObservation(oldExists: false, oldUnchanged: false, candidates: [row]).replacement(sample) == nil)
+    }
+    for changes: [[String: Any]] in [
+        [["op": "update", "item": "old", "due": "2030-01-01"]],
+        [["op": "delete", "item": "old"]],
+        [["op": "to_event", "item": "old", "calendar": "工作"]]
+    ] {
+        precondition(moveTargets(changes).isEmpty)
+        let fixture = MoveFixture()
+        _ = try fixture.run(moves: [])
+        precondition(fixture.runner.calls.isEmpty && fixture.committed && fixture.prepared.count == 1)
+        precondition(helperWatchdog(["method": "apply", "changes": changes]) == 7)
+    }
+    let mergeChanges: [[String: Any]] = [["op": "merge", "item": "source", "into": "old"],
+                                         ["op": "update", "item": "old", "list": "工作"]]
+    precondition(moveTargets(mergeChanges).map { $0.0 } == ["old"])
+    precondition(withoutList(mergeChanges[0])["into"] as? String == "old")
+    precondition(withoutList(mergeChanges[1])["list"] == nil)
+    precondition(helperWatchdog(["method": "apply", "changes": mergeChanges]) == 55)
+    try testMultipleMoves()
+    try testMovedMergeTarget()
+    for identifier in ["", "abc", "00000000-0000-0000-0000-000000000000\"", "\n00000000-0000-0000-0000-000000000000"] {
+        do { _ = try checkedAppleID(identifier); preconditionFailure("Unsafe identity accepted") }
+        catch is BridgeError {}
+    }
+    let safeID = try checkedAppleID("00000000-0000-0000-0000-000000000000")
+    precondition(safeID == "00000000-0000-0000-0000-000000000000")
+}
+func testMultipleMoves() throws {
+    let moves = ["a", "b"].map { ReminderMove(reference: $0, identifier: $0, sourceList: "source", targetList: "target",
+                                             title: $0, created: Date(timeIntervalSince1970: 100), original: [:]) }
+    for mode in ["success", "second_denied", "budget", "preflight"] {
+        let runner = MoveTestRunner()
+        var moved = Set<String>(), committed = false, time = 0.0, preparations = 0
+        runner.action = { id, _ in
+            if id == "b" && mode == "second_denied" { throw NSError(domain: "OlloAppleScript", code: -1743) }
+            moved.insert(id)
+            if mode == "budget" { time += 25 }
+        }
+        do {
+            let aliases = try applyWithMoves(moves, runner: runner, context: MutationContext([]), observe: { move, _ in
+                let done = moved.contains(move.identifier)
+                return MoveObservation(oldExists: !done, oldUnchanged: !done, candidates: done ? [
+                    MoveCandidate(identifier: move.identifier + "-new", list: move.targetList, title: move.title,
+                                  created: move.created, completed: false)] : [])
+            }, prepare: { aliases in
+                preparations += 1
+                if mode == "preflight" { throw BridgeError(message: "Invalid later operation") }
+                if preparations == 2 { precondition(aliases == ["a": "a-new", "b": "b-new"]) }
+            }, commit: { committed = true }, reset: {}, now: { time }, pause: { time += $0 })
+            precondition(mode == "success" && aliases.count == 2 && committed)
+        } catch let failure as MutationFailure {
+            precondition(!committed && failure.outcome == (mode == "preflight" ? "not_executed" : "unknown"))
+            precondition(mode == "preflight" ? runner.calls.isEmpty : runner.calls.count == (mode == "budget" ? 1 : 2))
+        }
+    }
+}
+
+func testMovedMergeTarget() throws {
+    let changes: [[String: Any]] = [
+        ["op": "merge", "item": "source", "into": "target"],
+        ["op": "update", "item": "target", "list": "工作", "due": "2030-01-01"]]
+    let move = ReminderMove(reference: "target", identifier: "target", sourceList: "inbox", targetList: "work",
+                            title: "target title", created: Date(timeIntervalSince1970: 100), original: [:])
+    let runner = MoveTestRunner()
+    var live = ["source": "source object", "target": "target object"], pending: [String] = [], committed: [String] = []
+    runner.action = { id, _ in live["new"] = live.removeValue(forKey: id) }
+    _ = try applyWithMoves([move], runner: runner, context: MutationContext(changes), observe: { move, _ in
+        MoveObservation(oldExists: live["target"] != nil, oldUnchanged: live["target"] != nil,
+            candidates: live["new"] == nil ? [] : [MoveCandidate(identifier: "new", list: "work", title: move.title,
+                                                               created: move.created, completed: false)])
+    }, prepare: { aliases in
+        let objects = try resolveGroup(["source", "target"], replacements: aliases, lookup: { live[$0] })
+        try stageGroup(changes, resolved: objects) { change, resolved in
+            if change["op"] as? String == "merge" {
+                precondition(resolved["source"] == "source object" && resolved["target"] == "target object")
+                pending.append("merged into " + (aliases["target"] ?? "target"))
+            } else {
+                precondition(resolved["source"] == nil && resolved["target"] == "target object" && change["list"] == nil)
+                pending.append("due on " + (aliases["target"] ?? "target"))
+            }
+        }
+    }, commit: { committed = pending }, reset: { pending = [] })
+    precondition(committed == ["merged into new", "due on new"] && runner.calls.count == 1)
 }
 
 func testFailureDiagnostics() throws {
@@ -672,6 +1127,7 @@ func testAppleMappingAndCollection() throws {
 // This branch is safe for development: it creates no EKEventStore and calls no permission APIs.
 if CommandLine.arguments.contains("--self-test") {
     do {
+        try testReminderMoves()
         try testFailureDiagnostics()
         try testReadOnlyInspection()
         try testMinutePrecisionDates()
@@ -756,6 +1212,10 @@ if CommandLine.arguments.contains("--self-test") {
             guard data.count <= 256000, let request = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 throw BridgeError(message: "Invalid request")
             }
+            // Preserve capture's seven seconds from process start. Only list
+            // updates may extend the alarm after stdin has been parsed.
+            let watchdog = helperWatchdog(request)
+            if watchdog > 7 { alarm(watchdog) }
             let method = request["method"] as? String
             let inboxOnly = method == "collect" && (request["calendars"] as? [String])?.isEmpty == true
             guard method == "capture_lookup" || (permitted(.reminder) && (method == "capture" || method == "inspect" || inboxOnly || permitted(.event))) else {

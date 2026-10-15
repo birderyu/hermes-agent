@@ -16,7 +16,7 @@
 | `reports.py`、`execution.py`、`location.py` | 精确 cron 外壳移除、可信日期、报告投递、最多 15 秒位置轮询 |
 | `schedule.py` | wake/capture/capture lookup/items/interpret、claim/finish、确认分组与真实回执 |
 | `wake.py`、`cron_lock.py` | 在宿主任务锁中检查暂停、持久 wake 意图与当日去重 |
-| `apple.py`、`helper_process.py`、`native/EventKitBridge.swift`、`native/Info.plist` | 固定 JSON 子进程协议、活动 request_id 登记、7 秒自退看门狗；批量读取、URL 标记捕获/核对、整组预检及单次 EventKit commit |
+| `apple.py`、`helper_process.py`、`native/EventKitBridge.swift`、`native/Info.plist` | 固定 JSON 子进程协议、活动 request_id 登记、普通请求 7 秒、换清单 55 秒自退看门狗；批量读取、捕获核对、AppleScript move 与单次 EventKit commit |
 | `apple_config.py`、`collector.py`、`scripts/ollo_collect*.py` | 名称对应表与采集范围校验；只读 collect、三个 cron 入口及共用加载器，独立于插件注册与密钥 |
 | `scripts/production_switch.py`、`scripts/production_switch_io.py`、`test_production_switch.py` | 正式切换的只读预检、离线备份/切换/回滚及合成状态测试；不操作 Ollo 网关或 Apple |
 | `contracts/schema.json`、`contracts/export_schema.py`、`contracts/README.md` | 当前合同的本地引用闭包、维护导出脚本与来源摘要 |
@@ -28,11 +28,27 @@
 | [C → D 衔接核对](docs/gateway-handoff.md) | 网关源码核对、逐接口路径/字段/认证、可信身份链与 capture 核对分工 |
 | [GTD Skill 候选](docs/gtd-skill-candidate.md)、[现行 gtd 差异候选](docs/gtd-skill-update-candidate.md)、[四任务完整提示词候选](docs/cron-prompts-candidate.md) | 已对照提供的原任务/Skill 快照，只供审阅，未安装、未更改真实任务 |
 
+## 换清单：AppleScript move（2026-10-15 开发变更，未部署）
+
+真实 iCloud 账户用 EventKit 更换 `reminder.calendar` 会在保存/commit 时失败（`com.apple.reminderkit/-3002`）。本次直接用「提醒事项」App 的 AppleScript `move`，不先尝试 EventKit，也不复制后删除。证据、全部预算、合同影响和验收清单见 [本次记录](../../custom/records/2026-10-15-ollo-bridge-applescript-move.md)。线上事实来自用户提供的设计会话，本次未接触真实提醒事项。
+
+helper 采用可替换的 `ReminderMoveRunner`，生产实现是进程内 `NSAppleScript`。先检查整组 originals，再用 `commit:false` 预检其余字段并 reset；按精确 `reminder id` / `list id` 移动，每次通过 EventKit 重新读取，要求目标清单、原始标题、完整 creationDate、未完成状态恰好匹配一条，且旧编号不存在。编号只接受 UUID，作为 Apple event descriptor 参数传入，绝不拼接脚本或按名称移动。缺创建时间、external/local 编号不同、目标存在同特征事项时拒绝移动。
+
+成功找回后在本组内替换旧引用，再按原顺序暂存其他字段，只 commit 一次；merge 目标随后换清单也使用找回的新对象。多个移动按首次涉及的顺序串行，同一事项多次指定清单取最终目标；每次发送前要求剩余软预算至少 27 秒。已有移动后发生失败或预算不足，整组为 unknown，不能逐项假报 done，也不会尝试搬回原清单。未移动的独立组仍可继续。
+
+自动化权限与 EventKit 读取权限是两项授权。**部署后须由用户在 Mac mini 屏幕上进入「系统设置 → 隐私与安全性 → 自动化」，允许负责进程控制「提醒事项」。** 用户提供的启动链以 osascript 为负责进程；实际条目以系统显示为准，不能保证重新签名/更换启动链后沿用旧授权。`Info.plist` 已加入 `NSAppleEventsUsageDescription`。首次调用可能后台启动提醒事项 App 并弹窗；应在部署验收窗口处理，拒绝返回固定权限原因，不输出系统原文。
+
+AppleScript 的命令回复超时为 12 秒，移动前读取最多 5 秒，移动后核对最多 5 秒；apply 软预算 48 秒、看门狗 55 秒、Python helper 58 秒、每组操作 62 秒。普通读取、capture、纯日期/delete/to_event 预算不变。NSAppleScript 随 helper 被终止，避免遗留 osascript 子进程；已发出的 Apple event **不因超时而取消**。因此 -1712/-609 后先核对：唯一找回则继续；旧事项暂时仍在也保留 unknown，不能承诺以后不会移动。此处采用比初始任务要求更保守的分类，依据 [Apple 的超时说明](https://developer.apple.com/library/archive/documentation/AppleScript/Conceptual/AppleScriptLangGuide/reference/ASLR_control_statements.html)。
+
+**移动会改变事项编号。** 本组内部可继续 update/merge；现有 `GTDResultEntry` 仅有 `index/status/reason`，没有新编号或旧新映射字段。成功回执只返回 `status: done`，不附 `reason`；编号变化及处理限制只记录在本文和维护记录，不作为界面提示，不改合同，也不把编号塞进文案当隐式协议。旧报告的 items、重点选择和后续卡片仍引用旧编号；刷新旧报告的 items 只能看到旧项不存在，必须重新生成报告取得新编号。重复提交完全相同的业务组仍由网关重放原回执，不重新移动。
+
+设计会话已在沙箱外复核：`hermes-plugins/` 26 个文件、553 项全过，helper `--self-test` 返回 `{"ok":true}`（用户提供的结果，发生于本轮文案调整前）。本轮将失败原因改为指定的简短事实文案，成功回执不附 `reason`；不在确认结果中解释编号或提供操作指南，权限授予步骤仍保留在文档中。本轮调整后的 Python 回归需沙箱外补跑；真实权限与链路仍待部署后验收。独立开发产物位于 `$HOME/.cache/hermes-agent-dev/ollo-move-20261015/`；本轮文案复核构建另放在 `$HOME/.cache/hermes-agent-dev/ollo-move-20261015-copy-review/`。只可运行 `--self-test` 做离线验证，普通执行会访问 EventKit。
+
 ## 复用与宿主增量
 
 复用 `PluginContext` 平台/路由/工具/hook/middleware、`ctx.llm.acomplete_structured`、辅助任务路由与凭据、`SessionDB.resolve_resume_session_id`、宿主 cron jobs/executions/delivery queue。上下文追加到本轮用户消息，保持既有 system prompt、工具集合及历史缓存前缀。
 
-源码核验发现：仓库只有 Apple Reminders 的 `remindctl` Skill，没有批量提醒事项+日历读写与依赖组单 commit 的原生核心工具。本插件从旧隔离日程审查副本复用并调整了 EventKit helper，**不是从运行目录复制，也不表示 helper 已部署**。其 `items` 一次读精确 ID 集合；`capture` 原文写固定「收件箱」；`apply` 先检查整组生成时 originals，按顺序 `commit:false` 暂存再只调用一次 commit；`collect` 提供只读报告采集与同次 originals。未完成/已变更/缺快照整组 skipped；写入超时、管道损坏、commit 失败均 unknown，不能承诺 Apple 跨设备原子回滚。
+源码核验发现：仓库只有 Apple Reminders 的 `remindctl` Skill，没有批量提醒事项+日历读写与依赖组单 commit 的原生核心工具。本插件从旧隔离日程审查副本复用并调整了 EventKit helper，**不是从运行目录复制，也不表示 helper 已部署**。其 `items` 一次读精确 ID 集合；`capture` 原文写固定「收件箱」；`apply` 先检查整组生成时 originals；普通变更按顺序 `commit:false` 暂存再只调用一次 commit，换清单的外部移动流程见上节；`collect` 提供只读报告采集与同次 originals。未完成/已变更/缺快照整组 skipped；写入超时、管道损坏、commit 失败均 unknown，不能承诺 Apple 跨设备原子回滚。
 
 D2 候选共保留一项通用核心补丁，A4/A5 均未扩大：`cron/delivery_retry.py` + `delivery_queue.py`/`scheduler_delivery.py`。v0.21.6 队列原本失败即终结。仅 live router 认证的 **单目标、无附件、非 relay、`idempotent_delivery=True`** 获得重试资格；任务字段不能自行开启。进程内调度先入原队列并立即尝试一次，失败由既有 drain 重试；相同执行 ID 和内容最多 5 次，间隔 1/5/30/120 秒。认证行的 pending/in-flight 不报成功，不走 standalone。其他平台保留原 at-most-once 语义。完整理由、上游状态与退出条件见 [补丁清单](../../custom/patches.md#未提交幂等-live-adapter-的有界投递重试)。
 
@@ -152,7 +168,7 @@ interpret 的 18 秒总预算覆盖报告读取、模型等待和输出校验；
 
 capture 的 URL 固定为 `ollo://capture/<request_id>`，不写进标题或备注。lookup 的许可过期 + 30 秒和当前 attempt/unknown 校验由网关负责。bridge 不保存执行记录：内存仅登记活动 request_id（含迟到 spawn 的清理），结束即移除；重启后空登记直接查询。仅完整提醒权限下遍历全部清单（含已完成事项）且无匹配才 absent；权限不足、超时、不完整或多重匹配均 unavailable。
 
-原生 helper 在读取 stdin 前启动独立 `alarm(7)`，短于网关 8 秒执行许可，恢复并解屏蔽 SIGALRM 的默认终止行为；即使父进程退出或 EventKit 阻塞也自行终止。bridge 仍按自身预算 kill 并回收（capture 最多 6 秒、lookup 最多 5 秒），不能把超时当作未写入。只有用户手动 `--authorize` 的授权流程不受 7 秒限制，该分支不写事项。
+原生 helper 在读取 stdin 前启动独立 `alarm(7)`，短于网关 8 秒执行许可，恢复并解屏蔽 SIGALRM 的默认终止行为；即使父进程退出或 EventKit 阻塞也自行终止。bridge 仍按自身预算 kill 并回收（capture 最多 6 秒、lookup 最多 5 秒），不能把超时当作未写入。capture/lookup/collect 等普通请求不会重新计时；只有已解析的换清单 apply 重设为 55 秒。用户手动 `--authorize` 的授权流程不设看门狗，该分支不写事项。
 
 ## 从测试任务切到正式任务（2026-10-14 11:36–11:39 已执行）
 
@@ -168,7 +184,7 @@ capture 的 URL 固定为 `ollo://capture/<request_id>`，不写进标题或备�
 
 1. 在沙箱外跑下面测试及 B+C/D 联测，核对源码、模型替身结果与跨仓库 run 映射；生产 `schedule` 保持关闭。D12 已对照提供的四任务原提示和 Skill 快照，审阅完整候选及下文的脚本失败/跨日边界。
 2. 在授权窗口暂停新调度、旧投递/推送，按方案一致备份旧插件、配置和 SQLite；不读旧业务表，不导入/重放旧数据。明确切换截点，隔离截点之前或缺可信时间的执行与旧队列。
-3. 用户在网关与 Hermes 终端写入独立 bridge key、匹配 binding/根会话/四任务白名单、回环 URL/端口与网关切换截点。按选定绝对路径编译/安装 `native/EventKitBridge.swift`，链接配套 `native/Info.plist` 的权限用途说明（`swiftc … -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker native/Info.plist -o …`）；由用户显式完成 Apple 提醒事项与日历权限。`--authorize` 才会请求权限，普通执行不会弹授权请求。
+3. 用户在网关与 Hermes 终端写入独立 bridge key、匹配 binding/根会话/四任务白名单、回环 URL/端口与网关切换截点。按选定绝对路径编译/安装 `native/EventKitBridge.swift`，链接配套 `native/Info.plist` 的权限用途说明（`swiftc … -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker native/Info.plist -o …`）；由用户显式完成 Apple 提醒事项与日历权限。`--authorize` 才会请求 EventKit 权限；确认换清单发送 Apple Events 时可能另弹自动化授权，见下节。
 4. 部署 fork 的宿主增量和**完整**插件目录（运行必需 `.py`、plugin.yaml、contracts/schema.json）；按上文精确差异替换 plugins.enabled，清理旧 location entry，保留旧目录。不新增 Ollo/API 工具白名单，不要求新增 bridge entry，但必须写 `timezone: Asia/Shanghai`（见上表），现有平台 enabled 配置无需为 bridge 改写；同一平台/工具/发现路由不能重复注册。按已有授权维护流程排空并重启 Hermes；本次未授权自动执行此步。
 5. 按下一节安装四个脚本文件，更新现行 gtd 的差异和 v1 Skill、四段完整提示词；保留 job ID、08:00/09:30/21:00 时刻、模型与 repeat。全部单投 Ollo、无附件、attach_to_session=false、enabled_toolsets=[]。核对 failure_deliver 为空继承或同样单投 Ollo；这只配置真正宿主失败的路由，不会把 Script Error 自动升级为失败投递。
 6. 配置 `apple` 把六清单、三日历分别对应到「Ollo 测试·…」，重载配置后用专用假事项验收 wake 兜底、capture、items/interpret、确认、Apple/iCloud 回执；另验收 App/SSE、通知、位置。APNs 与自动位置在网关配置，手机重新开启授权。完成后撤掉测试对应表并重载；测试报告/确认不能继续作为生产写入授权。解决下面失败/跨日边界并按单独发布授权打开能力、恢复自然调度。

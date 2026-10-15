@@ -23,7 +23,7 @@ def diagnostic_fields(value):
     if identity is None:
         return None
     phase, op, fields = value.get('phase'), value.get('op'), value.get('fields')
-    if phase not in ('prepare', 'commit') or not isinstance(op, str) or op not in OPERATIONS:
+    if phase not in ('prepare', 'move', 'reconcile', 'commit') or not isinstance(op, str) or op not in OPERATIONS:
         return None
     if not isinstance(fields, list):
         return None
