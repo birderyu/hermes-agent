@@ -1,4 +1,6 @@
-# 现行 gtd Skill 的差异候选（D12 / D13 / D16，未安装）
+# 现行 gtd Skill 的差异候选（将于正式切换时安装）
+
+2026-10-14 状态：这是正式切换的审阅清单，不是完整可安装 Skill。将于正式切换时安装的 `gtd` 以运行中已验收的 `gtd-ollo-test` 为正文来源，恢复 `name: gtd` 和原 gtd 的 description，去掉“仅供测试”，不重写业务规则。A7 已在下表中。工具与执行边界见 [正式切换方案](../../../custom/records/2026-10-14-ollo-gtd-production-switch.md)；本轮未读取运行 Skill。
 
 只列对设计会话只读快照 `gtd-SKILL.md` 的替换/补充点，行号针对该快照；未复制原文全文，也未修改运行 Skill。完整提示词见 [四任务候选](cron-prompts-candidate.md)，结构化合同见 [hermes-plus-gtd v1 候选](gtd-skill-candidate.md)。安装时保留 `gtd` 名称与业务规则；用户已决定停用旧消息投递。
 
