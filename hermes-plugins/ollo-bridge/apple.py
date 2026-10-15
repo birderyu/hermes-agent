@@ -6,14 +6,19 @@ from .protocol import BridgeError, ITEMS_RESPONSE_BYTES, dumps, loads, require, 
 from .http_client import Budget
 from .helper_process import HelperProcesses, NotStarted
 from .apple_config import names
+from .apple_diagnostic import diagnostic_fields
 
 
 class NotExecuted(Exception):
-    pass
+    def __init__(self, message='', *, diagnostic=None):
+        super().__init__(message)
+        self.diagnostic = diagnostic_fields(diagnostic)
 
 
 class UnknownWrite(Exception):
-    pass
+    def __init__(self, message='', *, diagnostic=None):
+        super().__init__(message)
+        self.diagnostic = diagnostic_fields(diagnostic)
 
 
 class AppleBackend:
@@ -26,14 +31,17 @@ class AppleBackend:
         if not self.executable or not Path(self.executable).is_absolute():
             raise NotExecuted('helper_not_configured')
         budget = Budget(timeout)
+        diagnostic = None
         try:
             returncode, stdout = await self.processes.run(
                 self.executable, dumps({**request, 'apple': self.apple}).encode('utf-8'), budget, request_id)
             limit = ITEMS_RESPONSE_BYTES if request.get('method') == 'items' else 1048576
             require(len(stdout) <= limit, 'payload_too_large', 413)
             result = loads(stdout)
+            if isinstance(result, dict) and (returncode or 'error' in result or result.get('outcome') == 'not_executed'):
+                diagnostic = diagnostic_fields(result.get('diagnostic'))
             if isinstance(result, dict) and result.get('outcome') == 'not_executed':
-                raise NotExecuted('helper_rejected_before_commit')
+                raise NotExecuted('helper_rejected_before_commit', diagnostic=diagnostic)
             require(not returncode and isinstance(result, dict) and 'error' not in result)
             return result
         except NotStarted as exc:
@@ -42,7 +50,7 @@ class AppleBackend:
             raise
         except (asyncio.CancelledError, asyncio.TimeoutError, OSError, BridgeError) as exc:
             if write:
-                raise UnknownWrite('write_outcome_unknown') from exc
+                raise UnknownWrite('write_outcome_unknown', diagnostic=diagnostic) from exc
             if isinstance(exc, asyncio.CancelledError):
                 raise
             if isinstance(exc, BridgeError) and exc.code == 'payload_too_large':

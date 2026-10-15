@@ -177,7 +177,8 @@ def native_executable(tmp_path_factory):
     executable = tmp_path / 'ollo-eventkit'
     source = Path(__file__).parent / 'native/EventKitBridge.swift'
     # xcrun is the macOS developer-tools entry point, not a PATH guess.
-    subprocess.run(['/usr/bin/xcrun', 'swiftc', '-module-cache-path', str(tmp_path / 'modules'),
+    # Exercise the optimized build while keeping the older assert-based contracts active.
+    subprocess.run(['/usr/bin/xcrun', 'swiftc', '-O', '-assert-config', 'Debug', '-module-cache-path', str(tmp_path / 'modules'),
                     str(source), '-Xlinker', '-sectcreate', '-Xlinker', '__TEXT', '-Xlinker', '__info_plist',
                     '-Xlinker', str(source.with_name('Info.plist')), '-o', str(executable)], check=True, capture_output=True, timeout=90)
     return executable

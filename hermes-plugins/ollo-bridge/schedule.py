@@ -3,6 +3,7 @@ import asyncio
 from uuid import uuid4
 
 from .apple import NotExecuted, UnknownWrite
+from .apple_diagnostic import log_failure
 from .http_client import Budget
 from .protocol import BridgeError, dumps, references, require, schema, validate
 from .wake import enqueue_wake
@@ -69,9 +70,11 @@ class Schedule:
                 raise NotExecuted('budget_exhausted_before_helper')
             outcome = {'kind': kind, 'status': 'succeeded', **await execute(permit, timeout)}
             validate('B_BridgeOperationOutcome', outcome)
-        except NotExecuted:
+        except NotExecuted as exc:
+            log_failure(operation_id, exc)
             outcome = {'kind': kind, 'status': 'failed_not_executed', 'reason': '执行未启动或提交前被拒绝', 'retryable': True}
-        except (UnknownWrite, asyncio.CancelledError):
+        except (UnknownWrite, asyncio.CancelledError) as exc:
+            log_failure(operation_id, exc)
             outcome = {'kind': kind, 'status': 'unknown', 'reason': '写入结果未知，需核对；不可重试写入', 'retryable': False}
         except Exception:  # health: allow BLE001 -- after dispatch, classify unknown without logging private Apple payloads
             # Any unexpected failure after dispatch can be after commit. Do not

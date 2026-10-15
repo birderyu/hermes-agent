@@ -17,14 +17,60 @@ if !CommandLine.arguments.contains("--authorize") {
 }
 
 struct BridgeError: Error { let message: String }
-struct MutationFailure: Error { let outcome: String }
+struct MutationContext {
+    let op: String
+    let fields: [String]
+    init(_ changes: [[String: Any]]) {
+        let allowed: [String: Set<String>] = [
+            "update": ["title", "list", "due", "waiting_for", "follow_up"], "delete": [],
+            "merge": ["title"], "to_event": ["calendar", "start", "minutes"],
+            "update_event": ["start", "minutes"], "create_reminder": ["title", "list", "due", "alarm"],
+            "capture": ["title", "list", "notes", "url"]
+        ]
+        let ops = Set(changes.map { change in
+            let op = change["op"] as? String ?? "unknown"
+            return allowed[op] == nil ? "unknown" : op
+        })
+        op = ops.count == 1 ? ops.first! : (ops.isEmpty ? "unknown" : "batch")
+        fields = Set(changes.flatMap { change -> [String] in
+            let keys = allowed[change["op"] as? String ?? ""] ?? []
+            return effectiveChange(change).keys.filter { keys.contains($0) }
+        }).sorted()
+    }
+}
+struct MutationFailure: Error {
+    let outcome: String
+    let diagnostic: [String: Any]
+    init(_ error: Error, phase: String, context: MutationContext) {
+        let error = error as NSError
+        outcome = phase == "prepare" ? "not_executed" : "unknown"
+        var data: [String: Any] = ["phase": phase, "domain": error.domain, "code": error.code,
+                                   "op": context.op, "fields": context.fields]
+        // userInfo/description can embed reminder content. Only the immediate
+        // underlying identity is useful here; never serialize or recurse into it.
+        if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError {
+            data["underlyingError"] = ["domain": underlying.domain, "code": underlying.code]
+        }
+        diagnostic = data
+    }
+    var response: [String: Any] {
+        ["error": "EventKit operation unavailable", "outcome": outcome, "diagnostic": diagnostic]
+    }
+}
 
 // All EventKit saves in prepare use commit:false. Only commit errors are uncertain.
-func commitChanges(prepare: () throws -> Void, commit: () throws -> Void, reset: () -> Void) throws {
+func commitChanges(context: () -> MutationContext = { MutationContext([]) },
+                   prepare: () throws -> Void, commit: () throws -> Void, reset: () -> Void) throws {
     do { try prepare() }
-    catch { reset(); throw MutationFailure(outcome: "not_executed") }
+    catch {
+        let failure = MutationFailure(error, phase: "prepare", context: context())
+        reset(); throw failure
+    }
     do { try commit() }
-    catch { reset(); throw MutationFailure(outcome: "unknown") }
+    catch {
+        let failure = MutationFailure(error, phase: "commit", context: context())
+        reset(); throw failure
+    }
 }
 
 let null = NSNull()
@@ -188,6 +234,41 @@ func authorize(_ store: EKEventStore) throws {
     }
 }
 
+// This projection has no store or mutation methods. Raw values are reduced
+// immediately; callers cannot accidentally serialize titles, URLs or identifiers.
+struct ReminderStructure {
+    let fields: [String: Any]
+    init(hasNotes: Bool, hasAlarms: Bool, hasRecurrenceRules: Bool, hasAttendees: Bool,
+         url: URL?, sourceType: Int?, allowsContentModifications: Bool?,
+         externalIdentifier: String?, identifier: String, title: String) {
+        fields = ["exists": true, "hasNotes": hasNotes, "hasAlarms": hasAlarms,
+                  "hasRecurrenceRules": hasRecurrenceRules, "hasAttendees": hasAttendees,
+                  "urlIsEmpty": url?.absoluteString.isEmpty ?? true,
+                  "calendar": ["sourceType": sourceType.map { $0 as Any } ?? null,
+                               "allowsContentModifications": allowsContentModifications.map { $0 as Any } ?? null],
+                  "identifiersEqual": externalIdentifier == identifier,
+                  "titleLength": title.unicodeScalars.count,
+                  "titleHasNewline": title.rangeOfCharacter(from: .newlines) != nil]
+    }
+    init(_ item: EKReminder) {
+        self.init(hasNotes: item.hasNotes, hasAlarms: item.hasAlarms,
+                  hasRecurrenceRules: item.hasRecurrenceRules, hasAttendees: item.hasAttendees,
+                  url: item.url, sourceType: item.calendar?.source?.sourceType.rawValue,
+                  allowsContentModifications: item.calendar?.allowsContentModifications,
+                  externalIdentifier: item.calendarItemExternalIdentifier,
+                  identifier: item.calendarItemIdentifier, title: item.title ?? "")
+    }
+}
+func inspectReminders(_ request: [String: Any], lookup: (String) throws -> ReminderStructure?) throws -> [String: Any] {
+    guard Set(request.keys) == Set(["method", "ids"]), request["method"] as? String == "inspect",
+          let ids = request["ids"] as? [String], !ids.isEmpty, ids.count <= 100,
+          ids.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
+        throw BridgeError(message: "Invalid inspection request")
+    }
+    // Positional correspondence avoids echoing any identifier in stdout.
+    return ["items": try ids.map { try lookup($0)?.fields ?? ["exists": false] }]
+}
+
 final class Bridge {
     let store: EKEventStore
     let names: AppleNames
@@ -310,15 +391,21 @@ final class Bridge {
             }
             resolved[id] = item
         }
-        try commitChanges(prepare: {
+        let groupContext = MutationContext(changes)
+        var activeContext = groupContext
+        try commitChanges(context: { activeContext }, prepare: {
             for raw in changes {
                 // v1: optional null means unchanged, never an implicit field clear.
                 let change = effectiveChange(raw)
+                activeContext = MutationContext([change])
                 try self.stage(change, resolved)
                 if ["delete", "merge", "to_event"].contains(change["op"] as? String ?? ""),
                    let id = change["item"] as? String { resolved.removeValue(forKey: id) }
             }
-        }, commit: { try self.store.commit() }, reset: { self.store.reset() })
+        }, commit: {
+            activeContext = groupContext
+            try self.store.commit()
+        }, reset: { self.store.reset() })
         return ["status": "done"]
     }
     func stage(_ change: [String: Any], _ resolved: [String: EKCalendarItem]) throws {
@@ -385,6 +472,13 @@ final class Bridge {
 
     func handle(_ request: [String: Any]) throws -> [String: Any] {
         let method = try string(request["method"])
+        if method == "inspect" {
+            return try inspectReminders(request) { id in
+                guard let item = try self.lookup(id) else { return nil }
+                guard let reminder = item as? EKReminder else { throw BridgeError(message: "Expected reminder") }
+                return ReminderStructure(reminder)
+            }
+        }
         if method == "items" {
             guard let ids = request["ids"] as? [String], ids.count <= 100 else { throw BridgeError(message: "Invalid ids") }
             // Refresh sends only public fields. Private notes must not consume
@@ -395,7 +489,9 @@ final class Bridge {
             guard let payload = request["request"] as? [String: Any] else { throw BridgeError(message: "Invalid capture") }
             let fields = try captureFields(payload)
             var item: EKReminder!
-            try commitChanges(prepare: {
+            let context = MutationContext([["op": "capture", "title": fields.title, "list": "收件箱",
+                                             "notes": fields.notes, "url": fields.url]])
+            try commitChanges(context: { context }, prepare: {
                 item = try self.addReminder(["title": fields.title, "list": "收件箱"], notes: fields.notes, url: fields.url)
             }, commit: { try self.store.commit() }, reset: { self.store.reset() })
             return ["id": stableID(item)]
@@ -424,6 +520,89 @@ final class Bridge {
         let unchanged = calendars == Set(store.calendars(for: .reminder).map { $0.calendarIdentifier })
         return captureLookupResult("ollo://capture/" + id, rows: rows.map { ($0.url?.absoluteString, stableID($0)) },
                                    fullAccess: permitted(.reminder), complete: unchanged, checkedAt: Date())
+    }
+}
+
+func testFailureDiagnostics() throws {
+    let privateValues = ["PRIVATE_TITLE", "PRIVATE_NOTES", "PRIVATE_LIST", "PRIVATE_ID"]
+    let privateText = privateValues.joined(separator: " ")
+    let underlying = NSError(domain: "NSCocoaErrorDomain", code: 42,
+                             userInfo: [NSLocalizedDescriptionKey: privateText, "notes": privateText])
+    let error = NSError(domain: "EKErrorDomain", code: 17,
+                        userInfo: [NSLocalizedDescriptionKey: privateText, NSUnderlyingErrorKey: underlying,
+                                   "title": privateText, "calendar": privateText, "item": privateText])
+    let change: [String: Any] = ["op": "update", "item": privateValues[3], "title": privateValues[0],
+                               "list": privateValues[2], "notes": privateValues[1], "due": null,
+                               privateText: privateText]
+    let context = MutationContext([change])
+    precondition(context.op == "update" && context.fields == ["list", "title"])
+    for phase in ["prepare", "commit"] {
+        var commits = 0, resets = 0
+        do {
+            try commitChanges(context: { context }, prepare: {
+                if phase == "prepare" { throw error }
+            }, commit: {
+                commits += 1; throw error
+            }, reset: { resets += 1 })
+            preconditionFailure("Failure must throw")
+        } catch let failure as MutationFailure {
+            precondition(failure.outcome == (phase == "prepare" ? "not_executed" : "unknown"))
+            precondition(commits == (phase == "prepare" ? 0 : 1) && resets == 1)
+            let expected: [String: Any] = ["phase": phase, "domain": "EKErrorDomain", "code": 17,
+                "op": "update", "fields": ["list", "title"],
+                "underlyingError": ["domain": "NSCocoaErrorDomain", "code": 42]]
+            precondition(NSDictionary(dictionary: failure.diagnostic).isEqual(to: expected))
+            let wire = String(data: try encodedJSON(failure.response), encoding: .utf8)!
+            precondition(privateValues.allSatisfy { !wire.contains($0) })
+        }
+    }
+    let batch = MutationContext([change, ["op": "delete", "item": privateText]])
+    precondition(batch.op == "batch" && batch.fields == ["list", "title"])
+    let unknown = MutationContext([["op": privateText, privateText: privateText]])
+    precondition(unknown.op == "unknown" && unknown.fields.isEmpty)
+    let capture = MutationContext([["op": "capture", "title": privateText, "list": privateText,
+                                    "notes": privateText, "url": privateText]])
+    precondition(capture.fields == ["list", "notes", "title", "url"])
+}
+
+func testReadOnlyInspection() throws {
+    let title = "PRIVATE_TITLE\n😀e\u{301}"
+    let fixture = ReminderStructure(hasNotes: true, hasAlarms: true, hasRecurrenceRules: true, hasAttendees: true,
+        url: URL(string: "https://example.invalid/PRIVATE_URL"), sourceType: 2, allowsContentModifications: false,
+        externalIdentifier: "PRIVATE_EXTERNAL_ID", identifier: "PRIVATE_LOCAL_ID", title: title)
+    let empty = ReminderStructure(hasNotes: false, hasAlarms: false, hasRecurrenceRules: false, hasAttendees: false,
+        url: nil, sourceType: nil, allowsContentModifications: nil,
+        externalIdentifier: "PRIVATE_SAME_ID", identifier: "PRIVATE_SAME_ID", title: "plain")
+    let before = try encodedJSON([fixture.fields, empty.fields])
+    var lookups = [String]()
+    let result = try inspectReminders(["method": "inspect", "ids": ["PRIVATE_ID", "missing", "empty"]]) { id in
+        lookups.append(id)
+        return id == "missing" ? nil : (id == "empty" ? empty : fixture)
+    }
+    precondition(lookups == ["PRIVATE_ID", "missing", "empty"])
+    let rows = result["items"] as! [[String: Any]]
+    let expected: [String: Any] = ["exists": true, "hasNotes": true, "hasAlarms": true,
+        "hasRecurrenceRules": true, "hasAttendees": true, "urlIsEmpty": false,
+        "calendar": ["sourceType": 2, "allowsContentModifications": false], "identifiersEqual": false,
+        "titleLength": title.unicodeScalars.count, "titleHasNewline": true]
+    precondition(NSDictionary(dictionary: rows[0]).isEqual(to: expected))
+    precondition(NSDictionary(dictionary: rows[1]).isEqual(to: ["exists": false]))
+    precondition(rows[2]["urlIsEmpty"] as? Bool == true && rows[2]["identifiersEqual"] as? Bool == true)
+    precondition(rows[2]["titleHasNewline"] as? Bool == false)
+    let after = try encodedJSON([fixture.fields, empty.fields])
+    precondition(before == after)
+    let wire = String(data: try encodedJSON(result), encoding: .utf8)!
+    precondition(!wire.contains("PRIVATE_") && !wire.contains("https://"))
+    // A mutation-shaped request fails before even the read callback is invoked.
+    for request: [String: Any] in [
+        ["method": "inspect", "ids": ["PRIVATE_ID"], "changes": [["op": "delete"]]],
+        ["method": "apply", "ids": ["PRIVATE_ID"]], ["method": "inspect", "ids": []],
+        ["method": "inspect", "ids": [" "]], ["method": "inspect", "ids": Array(repeating: "id", count: 101)]
+    ] {
+        do {
+            _ = try inspectReminders(request) { _ in preconditionFailure("Unexpected read") }
+            preconditionFailure("Invalid inspection accepted")
+        } catch is BridgeError {}
     }
 }
 
@@ -493,6 +672,8 @@ func testAppleMappingAndCollection() throws {
 // This branch is safe for development: it creates no EKEventStore and calls no permission APIs.
 if CommandLine.arguments.contains("--self-test") {
     do {
+        try testFailureDiagnostics()
+        try testReadOnlyInspection()
         try testMinutePrecisionDates()
         try testAppleMappingAndCollection()
         let dateOnly = try components("2026-10-05")
@@ -565,7 +746,7 @@ if CommandLine.arguments.contains("--self-test") {
         assert(lookupResult([], complete: false)["status"] as? String == "unavailable")
         assert(lookupResult([(target, "a"), (target, "b")])["status"] as? String == "unavailable")
         emit(["ok": true])
-    } catch { emit(["error": "Date self-test failed"]); exit(1) }
+    } catch { emit(["error": "Bridge self-test failed"]); exit(1) }
 } else {
     do {
         if CommandLine.arguments.contains("--authorize") {
@@ -577,14 +758,14 @@ if CommandLine.arguments.contains("--self-test") {
             }
             let method = request["method"] as? String
             let inboxOnly = method == "collect" && (request["calendars"] as? [String])?.isEmpty == true
-            guard method == "capture_lookup" || (permitted(.reminder) && (method == "capture" || inboxOnly || permitted(.event))) else {
+            guard method == "capture_lookup" || (permitted(.reminder) && (method == "capture" || method == "inspect" || inboxOnly || permitted(.event))) else {
                 throw BridgeError(message: "Permission unavailable")
             }
             let names = try AppleNames(request["apple"])
             emit(try Bridge(EKEventStore(), names: names).handle(request))
         }
     } catch let failure as MutationFailure {
-        emit(["error": "EventKit operation unavailable", "outcome": failure.outcome]); exit(1)
+        emit(failure.response); exit(1)
     } catch let failure as BridgeError {
         emit(["error": failure.message == "collection_limit_exceeded" ? failure.message : "EventKit operation unavailable",
               "outcome": "not_executed"]); exit(1)

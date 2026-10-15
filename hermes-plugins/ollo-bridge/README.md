@@ -1,4 +1,6 @@
-# Ollo bridge（0.1.0 候选，未部署）
+# Ollo bridge
+
+2026-10-14：初次测试部署见 [10-11 记录](../../custom/records/2026-10-11-ollo-bridge-deploy.md)。用户提供的验收现状及真实任务/真实清单切换步骤见 [正式切换方案](../../custom/records/2026-10-14-ollo-gtd-production-switch.md)。本次只准备工具和文档，未访问运行 home、部署或重启。下文 D/A 阶段的“候选/未部署”和测试计数是历史开发记录，不代表当前线上状态。
 
 唯一的 Hermes 侧薄插件。网关负责报告、设备/位置、APNs、日程业务回执；本插件只适配 HTTP、可信会话、cron 与 Apple 执行。没有报告/位置/回执数据库，不调用旧插件迁移，不导入旧数据。旧 `ollo-inbox`、`ollo-location`、`ollo-conversation` 源码目录保留；切换时停用旧注册项。
 
@@ -16,6 +18,7 @@
 | `wake.py`、`cron_lock.py` | 在宿主任务锁中检查暂停、持久 wake 意图与当日去重 |
 | `apple.py`、`helper_process.py`、`native/EventKitBridge.swift`、`native/Info.plist` | 固定 JSON 子进程协议、活动 request_id 登记、7 秒自退看门狗；批量读取、URL 标记捕获/核对、整组预检及单次 EventKit commit |
 | `apple_config.py`、`collector.py`、`scripts/ollo_collect*.py` | 名称对应表与采集范围校验；只读 collect、三个 cron 入口及共用加载器，独立于插件注册与密钥 |
+| `scripts/production_switch.py`、`scripts/production_switch_io.py`、`test_production_switch.py` | 正式切换的只读预检、离线备份/切换/回滚及合成状态测试；不操作 Ollo 网关或 Apple |
 | `contracts/schema.json`、`contracts/export_schema.py`、`contracts/README.md` | 当前合同的本地引用闭包、维护导出脚本与来源摘要 |
 | `fixtures/*.json` | 42 份合成 bridge 合同样例，含 A2 lookup/in_progress 与 A4 failure 报告 |
 | `ollo_bridge_test_support.py`、`test_transport.py`、`test_schedule.py`、`test_cron.py`、`test_apple_contract.py`、`test_runtime.py`、`test_helper_process.py` | 临时 home、HTTP/模型/Apple 替身、真实插件注册/会话/运行/cron 挂接、进程退出与 lookup 测试 |
@@ -135,6 +138,10 @@ capture 先 claim，使用许可中的完整原文写固定「收件箱」，不
 
 A5 统一所有插件生成的 JSON 为紧凑 UTF-8（Python `ensure_ascii=False`），只保留 JSON 必要转义；字节预算按实际编码正文计算。items 响应上限 **2097152 字节**，包含必要控制字符转义；helper 只输出公开字段，超限返回 `413/payload_too_large/false`，由网关/App 缩批重取，不返回截短的 200。GTD 所有标题类字段和 originals 同步 4096 UTF-8 字节上限；只读采集、报告及确认前原值核对均保留完整标题。
 
+EventKit 的 prepare/commit 失败另附内容无关的 `diagnostic`：phase、NSError domain/code、op、有效请求 fields；直接 underlyingError 仅保留 domain/code。`apple.py` 和 `apple_diagnostic.py` 过滤字段，`schedule.py` 在失败分支记录一条 `WARNING EventKit failure <JSON>`，JSON 仅含 operation_id 与 diagnostic。诊断不进入网关 finish 或用户结果，原有 not_executed/unknown 分类、回执重放和禁止盲重试语义不变；不记录描述、userInfo 或 stderr。
+
+操作员可直接向 helper 发送 `{"method":"inspect","ids":["ID_1","ID_2"]}`，按输入顺序取得 EKReminder 的结构信息，不回显 ID 或内容。仅支持该精确请求形状；无 HTTP/模型工具入口，不申请权限，不写入或重试。字段含义、沙箱外 `swiftc -O`/Info.plist/签名/自检、部署与回滚和两条 ID 的私密输入命令见 [诊断维护记录](../../custom/records/2026-10-15-ollo-eventkit-diagnostics.md)。本补丁尚未部署，完整 bridge 测试在沙箱内 15 个文件均未能启动，须沙箱外补跑。
+
 interpret 的 18 秒总预算覆盖报告读取、模型等待和输出校验；任一超时或预算耗尽归一为 `504/interpret_timeout/true`。`protocol.py` 与 HTTP 客户端共用合同完整错误表，按 code 固定合法状态和 retryable；401/unauthorized、410/expired、413/payload_too_large、503/not_configured 等永久失败不会被改成可重试。未知或无法解析的上游错误统一隐藏为 `503/dependency_unavailable/true`，旧错误的未知重试语义保留为省略 retryable。
 
 字段级 `x-max-utf8-bytes` 超限同样返回 `413/payload_too_large/false`，遍历所有校验错误及 oneOf/anyOf/allOf 内层错误，避免先出现的 maxLength 或结构错误吞掉 413。其余 schema 错误仍为 400；items ID 等只限字符数的字段不增加字节约束。interpret 模型输出不论字节超限或结构非法，仍统一为 `503/invalid_model_output/true`。
@@ -143,7 +150,17 @@ capture 的 URL 固定为 `ollo://capture/<request_id>`，不写进标题或备�
 
 原生 helper 在读取 stdin 前启动独立 `alarm(7)`，短于网关 8 秒执行许可，恢复并解屏蔽 SIGALRM 的默认终止行为；即使父进程退出或 EventKit 阻塞也自行终止。bridge 仍按自身预算 kill 并回收（capture 最多 6 秒、lookup 最多 5 秒），不能把超时当作未写入。只有用户手动 `--authorize` 的授权流程不受 7 秒限制，该分支不写事项。
 
-## 部署顺序（本轮均未执行）
+## 从测试任务切到正式任务（2026-10-14 11:36–11:39 已执行）
+
+按 [正式切换方案](../../custom/records/2026-10-14-ollo-gtd-production-switch.md) 的命令和授权节点执行，不重复下面的初次安装。四个真实任务保持 ID、名称、时刻、model，单投 `ollo:main`，加载 `gtd` + `hermes-plus-gtd`，使用对应采集入口、空工具集、`attach_to_session=false`。删除测试四任务和 `gtd-ollo-test`，正式 gtd 从已验收测试 Skill 生成；删除 bridge 的 `apple` 映射，按缺省同名读取真实六清单、三日历。
+
+工具默认 `plan`，只有 `apply --backup-dir <新目录> --quiesced` 和 `rollback --backup-dir <原目录> --quiesced` 写文件。通过方案里的 `hermes_script` 函数复用已安装 Hermes 的 `runtime_command(code=...)` 执行，显式指定 HERMES_HOME；保留完整插件源码目录供候选和脚本对比。工具不调用 helper、不读 key，不替用户更新 Ollo 网关白名单，不停启服务。首尾空白以外的测试 prompt/候选差异、非默认采集范围或运行字段漂移都会阻止切换。
+
+`bridge.json` 在常驻插件注册时读取，采集脚本则每次读取，所以必须在两个网关与写入/投递都停止并排空的窗口操作。Ollo 白名单先加入真实 ID，再移除测试 ID；协调停机方案让 Hermes 和 Ollo 各停启一次。今日安排仍按 binding + 业务日去重，当天已有测试报告时，换 ID 不会取得第二份名额。首次真实运行、周日回顾和任何真实 Apple 写入都按方案单独验收。
+
+三个候选文档标为“将于正式切换时安装”。这里的“安装”指正式任务采用候选 prompt、测试 gtd 转正式；已经安装且验收的 `hermes-plus-gtd` 保留，不用仓库候选覆盖运行版。新工具与全部 bridge 测试在本次沙箱内均未能启动（PermissionError，0 collected），执行前须在沙箱外补跑，不能视为已通过。
+
+## 初次部署顺序（历史候选）
 
 1. 在沙箱外跑下面测试及 B+C/D 联测，核对源码、模型替身结果与跨仓库 run 映射；生产 `schedule` 保持关闭。D12 已对照提供的四任务原提示和 Skill 快照，审阅完整候选及下文的脚本失败/跨日边界。
 2. 在授权窗口暂停新调度、旧投递/推送，按方案一致备份旧插件、配置和 SQLite；不读旧业务表，不导入/重放旧数据。明确切换截点，隔离截点之前或缺可信时间的执行与旧队列。
