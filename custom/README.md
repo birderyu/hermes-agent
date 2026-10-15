@@ -10,8 +10,8 @@
 
 | 项目 | 值 |
 | --- | --- |
-| 官方基线 `main` | `v0.21.6`（`818c13be1d`，2026-10-08 发布） |
-| `custom` | `main` + 1 个 Hermes 补丁（cron）、Ollo 插件、维护文档；3 个 iMessage 补丁已于 2026-10-11 撤回，见 [补丁清单](patches.md) |
+| 官方基线 `main` | `v0.22.1`（`297552a9d6`，2026-10-15 发布；2026-10-15 升级，部署待 ollo-bridge 适配） |
+| `custom` | `main` + 2 个 Hermes 补丁（cron）、Ollo 插件、维护文档，见 [补丁清单](patches.md) |
 | 运行版本 | 以 `hermes --version` 为准，部署经过见 [记录](records/README.md) |
 | 开发副本 | `~/Projects/hermes-agent`（独立 clone） |
 | 运行目录 | `~/.hermes/hermes-agent`（只部署） |
