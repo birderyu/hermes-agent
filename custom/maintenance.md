@@ -46,7 +46,7 @@ source ./activate                                         # 进入开发环境�
 - 测试一律 `scripts/run_tests.sh`，不用裸 `pytest`。不激活时可以用 `HERMES_PYTHON=<测试环境的 python> scripts/run_tests.sh …`；测试环境的 python 用 `source ./activate` 后的 `$__HERMES_TEST_PYTHON` 查到。
 - `source ./activate` 要在 bash 里执行。zsh 下 `scripts/_activation.sh` 查找 Windows 版 Python 的通配符（`python-*/python.exe`）匹配不到会报 `no matches found`，激活失败。用 `bash -c 'export HERMES_RUNTIME_DIR=… HERMES_HOME=…; source ./activate; scripts/run_tests.sh …'`，或者先进入 bash。
 - `source ./activate` 每次都会先按锁文件同步一遍环境（已是最新时很快），所以依赖变化后直接重新激活即可。
-- 用 Codex CLI 改代码时，它的 `workspace-write` 沙箱默认禁止写 `.git`，需要单独放开开发副本的 `.git`：`-c 'sandbox_workspace_write.writable_roots=["/Users/birderyu/Projects/hermes-agent/.git"]'`，`~/.hermes` 保持不可写。沙箱里跑不了 Hermes 的 Python 测试（测试进程启动即 `PermissionError`），测试在沙箱外跑。
+- 用 Codex CLI 改代码时，它的 `workspace-write` 沙箱默认禁止写 `.git`，需要单独放开开发副本的 `.git`：`-c 'sandbox_workspace_write.writable_roots=["/Users/birderyu/Projects/hermes-agent/.git"]'`，`~/.hermes` 保持不可写。沙箱里跑不了 Hermes 的 Python 测试（测试进程启动即 `PermissionError`），测试在沙箱外跑。在 git worktree 里变基时，沙箱会拒绝创建 worktree 的 git 状态目录（`.git/worktrees/<名>/rebase-merge`），即使主仓库的 `.git` 在 `writable_roots` 里；这时让 Codex 只做静态审查和冲突合并候选，git 操作在沙箱外执行（2026-10-15）。
 
 ## 新增或修改补丁
 

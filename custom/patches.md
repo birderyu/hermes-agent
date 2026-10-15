@@ -2,41 +2,28 @@
 
 `custom` 相对官方基线 `main` 的全部改动。每次变基后更新提交号；补丁移除时移到「已移除」，不要直接删掉。
 
-基线：官方 `v0.21.6`（`818c13be1d`）。`git log --oneline main..custom` 应与下表一致；已在 `custom` 上撤回、等下次变基再丢掉的提交列在「已移除」里。
+基线：官方 `v0.22.1`（`297552a9d6`，2026-10-15 升级）。`git log --oneline main..custom` 应与下表一致。
 
 ## 现行补丁
 
 | 提交 | 内容 | 为什么还需要 | 上游状态 | 什么时候可以移除 |
 | --- | --- | --- | --- | --- |
-| `3a1874a17d` fix(cron): pass execution_id to live-adapter delivery metadata | 定时任务走 live adapter 投递时，把执行 ID 放进元数据 | `ollo-inbox` 与候选 `ollo-bridge` 均需要准确执行身份；bridge 据此查宿主账本并让网关幂等 | 无（一行，适合提 PR） | 上游等价透传；或所有消费者下线。网关接管收件箱后 bridge 仍需要，不能直接移除 |
-| `0dfb4385d6` chore(plugins): move Hermes+ server plugins into custom fork | `hermes-plugins/` 目录与忽略规则 | Ollo 服务端插件源码在本 fork 维护 | 个人插件，不提交上游 | 插件全部下线 |
-| `237f274a16` feat(plugins): rename Hermes+ plugins to Ollo and add ollo-conversation | `ollo-inbox`、`ollo-location`、`ollo-conversation` | Ollo App 与 Ollo 网关在用，见下 | 同上 | 按 Ollo 网关计划逐个下线 |
-| `08f696a1ba` docs(plugins): 更新 Ollo 部署与验证记录 | 插件 README | — | — | 随插件 |
-| `7d7752503f` chore(plugins): drop stale hermes-plus gitignore exceptions | 删掉根 `.gitignore` 里只针对旧插件名的例外 | 改名后由 `hermes-plugins/.gitignore` 负责 | — | — |
-| `cce920898c` test(plugins): follow v0.21.6 run stream in ollo-conversation mood test | `ollo-conversation` 测试改用 v0.21.6 的 `_RunStream` | 上游把任务事件队列换成了带序号和回放的流 | — | 随插件 |
-| （本表所在提交）docs(fork)、docs(custom): 维护文档 | `custom/` 目录（2026-10-11 由 `fork/` 改名） | 本 fork 的修订方式与记录 | — | — |
+| `1abf25911b` fix(cron): pass execution_id to live-adapter delivery metadata | 定时任务走 live adapter 投递时，把执行 ID 放进路由元数据（v0.22.1 起在 `cron/scheduler_delivery.py` 的 `_live_route_metadata` 普通分支） | ollo-bridge 据此查宿主执行账本，并让 Ollo 网关按执行 ID 幂等 | v0.22.1 仍没有：execution_id 只用于 Bot Chat 身份和外部 worker 判断（一行，适合提 PR） | 上游等价透传，或 ollo-bridge 下线 |
+| `71cfa6f80a` fix(cron): idempotent live delivery retry for single-target adapters | 声明 `idempotent_delivery=True` 的 live adapter 投递失败、发送进程死亡或超时后，按同一执行有界重放 | Ollo 的报告投递靠它做到「至少一次且不重复」 | v0.22.1 只部分覆盖，见下 | 见下 |
+| `402c399d50` `33ef9241fb` `c2f90a1bb8` `cb739533b7` `ca29601010` | `hermes-plugins/` 目录与忽略规则；`ollo-inbox`、`ollo-location`、`ollo-conversation` 及其文档、测试 | Ollo 服务端插件源码在本 fork 维护 | 个人插件，不提交上游 | 插件全部下线 |
+| `384c80420a` `cd3873d8ad` `321f745aab` `b00f191658` `ede9e955c6` | `ollo-bridge`（报告投递与读取、位置、身份、日程 handler、受限确认、GTD 正式切换工具、EventKit 诊断）与 `ollo-conversation` 语气开关 | 运行环境唯一在用的 Ollo 插件 | 同上 | 同上 |
+| `9dd4cb0b4d` `16f38f8393` `1ab6119a2a` `40ec1a5ff4` `a76cf21de0` `8663d9e22e` `2855a1fafc` `603a2c4b15` `2043ff7e70` `929779e08b` `d0ca63343c` `d9a892d1f6` 及本表所在提交 | `custom/` 维护文档与修订记录（2026-10-11 由 `fork/` 改名） | 本 fork 的修订方式与记录 | — | — |
 
 ### Ollo 插件的去留
 
-Ollo 网关（Ollo 仓库的 `server/`）在 2026-10-10 上线，App 改为只连网关。插件随网关的分步计划下线：
-
-| 插件 | 现在的用途 | 计划 |
+| 插件 | 现状 | 计划 |
 | --- | --- | --- |
-| `ollo-conversation` | 自称 Ollo；回复末尾的 `ollo-mood` 语气标记（网关从中取语气）；`GET /v1/ollo/conversation`（网关配置时发现会话） | 网关第 3 步自己分类语气后，只留「自称 Ollo」，并入薄插件 `ollo-bridge` |
-| `ollo-inbox` | `ollo:main` 投递平台、收件箱接口、`get_gtd_reports` 工具 | 网关第 2 步接管收件箱后下线；App 已不直接访问它的接口 |
-| `ollo-location` | `get_user_location` 工具、位置接口与唤醒推送 | 网关第 2 步接管位置后，工具并入 `ollo-bridge`；App 已不直接访问它的接口 |
+| `ollo-bridge` | 运行环境唯一在用的 Ollo 插件；2026-10-14 起 4 个 GTD 任务投递 `ollo:main` | 随 Ollo 网关计划演进 |
+| `ollo-conversation`、`ollo-inbox`、`ollo-location` | 10-11 起在运行环境停用，10-15 运行环境副本移入备份；仓库源码仍在 | 确认不再需要回滚后从仓库删除，由 Ollo 设计会话决定 |
 
-2026-10-11 未提交候选：`ollo-conversation` 已并入 `mood:false` 开关，关闭辅助分类并清除顶层语气围栏；保留 `cce920898c` 的 v0.21.6 流测试适配。设计会话已核验 D1 与线上逐字一致并确认通过；本会话未访问线上，见 [归并记录](records/2026-10-11-ollo-mood-toggle.md)。
+各插件的设计、对账与部署经过见 [记录](records/README.md)（`2026-10-11-ollo-*`、`2026-10-14-ollo-gtd-production-switch`、`2026-10-15-*`）和 [ollo-bridge README](../hermes-plugins/ollo-bridge/README.md)。
 
-2026-10-11 D2 未提交候选：新增唯一 `ollo-bridge`，承接报告投递/读取、位置工具、身份、四个日程 handler 与受限确认；旧三个目录保留，部署时再停用。设计复审后只保留下述一项通用核心补丁。执行时间/wake 身份改由插件读取既有执行账本与原投递队列快照；API run 身份复用宿主已有 approval ContextVar 和 active agent 映射，无需新增核心表面。Telegram 路由搬移及其测试引用改动已撤回。详情见 [源码候选记录](records/2026-10-11-ollo-bridge.md) 与 [插件 README](../hermes-plugins/ollo-bridge/README.md)。
-
-同日 A5 对账复查修复仅在插件内：interpret 全程超时归一、完整合同错误映射、紧凑 UTF-8 与 items 2097152 字节响应上限、GTD 标题/originals 4096 UTF-8 字节。设计会话沙箱外回传插件 286 passed / 0 failed、cron 1485 passed / 11 既有 skipped。第三轮 N3 补齐字段字节超限的 413 分类及组合 schema 测试，待再次复测；未新增或扩大宿主补丁，详见上述记录。
-
-同日 D12 在插件内补三个固定只读 cron 入口、六清单/三日历默认范围、500 项失败上限及 `apple.lists/calendars` 一一对应表。读写目标与 originals 比较共用逻辑名；对照设计会话提供的原任务/Skill 快照，产出四段完整提示词与 Skill 差异。Python AST/JSON/引用/差异检查和 Swift typecheck 通过，行为测试待沙箱外执行。没有新增或扩大宿主补丁：核验到普通 agent cron 的 Script Error 不自动设置 for_failure，脚本也收不到原 wake 日期；失败日账和跨日采集边界明确留在部署验收要求中，不靠提示词假装解决，见上述记录与插件 README。
-
-同日 D13 仅修文档：报告建议走卡片确认，用户直接请求保留对话明确确认后的 Apple Skill 执行。按用户提供的当前配置写精确 enabled 差异，不要求新增 bridge entry/timezone，不新增或替换 Ollo/API 工具白名单；没有任何代码或宿主补丁增量。
-
-### 未提交：幂等 live adapter 的有界投递重试
+### 投递重试补丁（`71cfa6f80a`）
 
 **为什么需要：** 原 `cron/delivery_queue.py::_finish` 将错误置为终态 `failed`；`claim_next` 只选 `pending`，因此 adapter 返回失败后不会再发送。`recover_abandoned` 将死进程已领取发送置为 `unknown`，同样不重试。这是原 at-most-once 策略，不是“持久队列自然会重试”。此外 `cron/scheduler_delivery.py::_deliver_result` 原来只为 detached worker 入队，`cron/scheduler.py::_launch_external_cron_worker` 在非 systemd 拓扑（包括当前 macOS 部署方式）走进程内路径，单改队列不覆盖这个入口。
 
@@ -46,11 +33,11 @@ Ollo 网关（Ollo 仓库的 `server/`）在 2026-10-10 上线，App 改为只�
 
 **快照生命周期：** pending/delivering 保留完整载荷供发送与重试；adapter 成功返回后 `_finish` 调用 `_prune_terminal_unlocked` 清空终态 job_json/content，仅保留结果元数据和幂等墓碑。这是上游既有策略（源自 `29e5172487`），`get_status` 不会隐藏活动行快照。第六轮插件测试误在成功 drain 后要求完整快照，已修正为在 HTTP 返回 201 前采集真实行，保留逐字相等断言，并补成功清理/终态不再发送断言；生产路径和核心补丁未改。
 
-**上游状态：** v0.21.6 及本地 `upstream/main` 快照 `a62979dc3601` 的队列均缺少这一 opt-in 能力。原实现最近相关提交 `eb2781dd2f` 解决及时 drain，未加入失败重试。本轮没有 fetch、查询线上 issue 或提交 PR，不据此声称上游最新状态。
+**上游状态（2026-10-15 对 v0.22.1 的核对）：** 只部分覆盖，不等价。普通 agent cron 已在发送前按执行 ID 持久入队，队列保留不可变快照（`cron/delivery_queue.py` 的 `enqueue`）；但 adapter 返回失败后仍置 `failed` 不再重试，已领取的行在发送进程死亡后仍置 `unknown` 不重放，已开始的发送超时仍按「假定成功」处理，也没有 opt-in 的认证、次数与退避。上游新增的终态回写（`recover_abandoned` 里的 `settle_quietly`、`cron/delivery_outcome.py` 对账）在变基中保留，认证重试只计入恢复数。逐项证据见 [v0.22.1 升级记录](records/2026-10-15-v0.22.1.md)。
 
 **什么时候可以移除：** 上游提供等价的幂等 adapter 声明、进程内持久入队、失败/死进程重放、超时不假成功能力时，重接插件后整体移除；或所有声明此能力的消费者下线。移除/回滚前先处理原队列里的 pending/in-flight 行，不能静默丢弃或无条件重放。
 
-**行为测试：** `tests/cron/test_delivery_retry.py` 覆盖相同载荷重放、退避上限、死进程恢复、非认证失败/unknown、任务伪造开关、fan-out/附件/relay 排除、发送超时与 standalone 差异。`hermes-plugins/ollo-bridge/test_cron.py` 以真实宿主 router/queue 和网关 HTTP 替身验证进程内失败后重试；A4 增加真实临时 wake/due scan/fire claim 的跨日开始、后续 job 变化、报告/失败类型和固定兜底。原 `tests/cron/test_delivery_queue.py`、`test_cron_relay_dm_origin_user_id.py` 保持原样，供非 opt-in 回归。设计会话第六轮回传 cron 1485 项全过；插件上述两个参数的测试时序修复待沙箱外复测，本会话未跑测试。
+**行为测试：** `tests/cron/test_delivery_retry.py` 覆盖相同载荷重放、退避上限、死进程恢复、非认证失败/unknown、任务伪造开关、fan-out/附件/relay 排除、发送超时与 standalone 差异。`hermes-plugins/ollo-bridge/test_cron.py` 以真实宿主 router/queue 和网关 HTTP 替身验证进程内失败后重试。原 `tests/cron/test_delivery_queue.py`、`test_cron_relay_dm_origin_user_id.py` 保持原样，供非 opt-in 回归。v0.22.1 上 `tests/cron/` 与 `hermes-plugins/` 全部通过。
 
 ## 运行环境里的非代码调整
 
@@ -71,11 +58,15 @@ v0.21.6 起，按闲置和每日定时自动重置会话要装插件 `hermes-ses
 
 ollo-bridge 下线，或者 bridge 不再检查时区之后，才可以删掉。
 
+### 会话自动清理：关闭（2026-10-15 起）
+
+v0.21.6 起 `sessions.auto_prune` 默认开启，网关会删除已结束且 90 天未活动的会话（置顶和进行中的不删）。用户要全部保留，`~/.hermes/config.yaml` 加了 `sessions.auto_prune: false`。当时最早的会话是 07-18，还没有被删过的。修改前的配置备份在 `~/.hermes/backups/pre-v0.22.1-20261015/config.yaml.pre-auto-prune`。只改了主档案，其他档案（care、gold、wiki 等）仍是默认。
+
 ## 已移除
 
 | 原提交（最后的 SHA） | 内容 | 移除日期 | 原因 |
 | --- | --- | --- | --- |
-| `b0958faafa` fix(photon): accept empty iMessage poll titles；`2f360fa07c` fix(photon): scope native poll lifecycle to clarify；`db496d81b7` fix(photon): align voice attachment filename with m4a | 空投票标题的 Spectrum 补丁；`clarify` 原生投票的生命周期与多选；语音附件 `.m4a` 文件名 | 2026-10-11 | 不再使用 iMessage，三个补丁都满足退出条件。在 `custom` 上由 `revert(photon): drop iMessage patches` 撤回，Photon 目录与官方 v0.21.6 逐字节一致；下次变基时原提交和撤回提交一起丢掉。重写后的投票生命周期始终没有真机验证 |
+| `b0958faafa` fix(photon): accept empty iMessage poll titles；`2f360fa07c` fix(photon): scope native poll lifecycle to clarify；`db496d81b7` fix(photon): align voice attachment filename with m4a | 空投票标题的 Spectrum 补丁；`clarify` 原生投票的生命周期与多选；语音附件 `.m4a` 文件名 | 2026-10-11 | 不再使用 iMessage，三个补丁都满足退出条件。先在 `custom` 上由撤回提交 `e596821fad` 抵消，2026-10-15 升级到 v0.22.1 的变基中原提交与撤回提交一起丢掉。同日运行环境关闭了 Photon。重写后的投票生命周期始终没有真机验证 |
 | （运行环境）语言覆盖 `custom/runtime/locales/zh.yaml`、`en.yaml` | 改写 `gateway.session.auto_reset_notice` 的文案 | 2026-10-11 | 不装会话自动重置插件，这条提示不会再出现。仓库里的文件删除，运行环境的副本移到 `~/.hermes/backups/cleanup-20261011/locales/` |
 | `866b894af1` fix(i18n): localize gateway session reset notices | 重置提示与会话信息块本地化 | 2026-10-11 | 上游已本地化（`gateway.session.*`）；剩下的措辞问题改用运行时语言覆盖。原补丁改 `run_turn.py` 和 17 个语言文件，每次升级都冲突 |
 | `bed1ad3fea` fix(photon): decode iMessage reply messages | 展开 `reply` 内容 | 2026-10-11 | 上游 `348a68bb4e`（PR #100663）等价且更完整 |
