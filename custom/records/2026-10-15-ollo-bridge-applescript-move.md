@@ -174,3 +174,15 @@ bash -c 'export HERMES_RUNTIME_DIR=$HOME/.cache/hermes-agent-dev/tools HERMES_HO
 5. 验收 merge 源/目标关联组、多个移动、仅日期、delete、to_event。后两项有真实删除含义，只用专用测试事项。模拟拒绝权限时应未执行；模拟超时/连接中断必须先核对，已移动可成功恢复，无法证明完成时 unknown 且不盲重试。部分移动后失败必须明确说明已发生部分移动。
 6. 用旧报告查看 items（预期旧项不存在）、旧重点选择和后续卡片（不应偷偷改写新项）；重新采集生成新报告应带新 ID 和 originals，新的确认才能继续操作。验收回执保存、App/SSE 展示与用户可见固定原因，日志不能出现事项内容或编号。
 7. 若需回滚，先停止新确认，保留移动后的实际事项及现有回执；回滚代码不能自动把事项搬回原清单，也不能清空 unknown/回执来重试。人工核对并重新生成报告后再恢复服务。
+
+## 执行记录（2026-10-15，设计会话，用户逐项同意）
+
+- **提交**：fork `custom` = `fc48a8fa16`（在 `b91c8e5a9c` 之上快进推送）。沙箱外：`hermes-plugins/` 26 文件 553 项通过；helper `--self-test` 为 `{"ok":true}`。
+- **部署**（22:38）：备份到 `~/.hermes/backups/applescript-move-20261015-223834/`（旧插件、旧 helper、暂存目录）；rsync 插件（排除 `__pycache__`、`.pytest_cache`、`contracts/export*`），与源码 `diff -rq` 一致；helper 用 `swiftc -O` 加 Info.plist 编译、ad-hoc 签名（标识 `com.birderyu.ollo.bridge.eventkit`）、自检后替换，与构建产物 `cmp` 一致。
+- **重启一次**：22:38:41 `hermes gateway restart`，22:38:48 ollo-bridge 已挂载、ollo 与 api_server 重新连接；launchd 的 program 仍为 `/usr/bin/osascript`，LaunchAgent plist 与 `~/.hermes/backups/pre-v0.22.1-20261015/ai.hermes.gateway.plist` 逐字一致；重启后日志无 ERROR、无 session_reset 警告。
+- **自动化授权与真实链路**：用一次性 no_agent 任务（`create_job(paused)` + `trigger_job`，由网关调度器执行，投递 local），在网关进程里依次 capture 测试事项 →  items → 与卡片确认相同的 apply（`{"op":"update","list":"工作","due":"2026-10-19"}`）。
+  - 第一次 22:40：Mac mini 弹出「osascript 想要控制提醒事项」，12 秒内未点，结果 `unknown / move_timeout`（诊断 `OlloAppleScript -1712`，phase reconcile），事项未移动。用户随后点「允许」。
+  - 第二次 22:42：apply `done`，11.4 秒；同一任务里用 `~/.local/bin/remindctl edit --list 收件箱` 移回，11.3 秒，编号改变，截止日期、备注、创建时间保留。
+  - 两条测试事项、两个一次性任务和 `~/.hermes/scripts/ollo_move_check.py` 已删除。
+- **remindctl**：用户 fork `birderyu/remindctl` 的 `custom` 分支 `85c5664`（AppleScript 兜底），`make test` 132 项通过；`make build` 产物复制到 `~/.local/bin/remindctl`（ad-hoc 签名）。Hermes LaunchAgent 的 PATH 里 `~/.local/bin` 排在 `/opt/homebrew/bin` 前，Hermes 因此用这份；终端里可能仍是 Homebrew 0.3.2。版本号显示 0.3.7（沿用 fork 的 version.env）。**回滚**：删除 `~/.local/bin/remindctl` 即退回 Homebrew 版。Hermes 升级后核对它仍在。
+- **留意**：AppleScript 移动的超时是 12 秒，真实链路一次 apply 用了 11.4 秒（含找回新事项与提交），余量不大。以后若出现 `move_timeout`，先看提醒事项 App 是否冷启动，再考虑把超时调大（helper 总预算 55 秒，够用）。
