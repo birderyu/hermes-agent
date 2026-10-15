@@ -24,6 +24,7 @@
 | [deploy.md](deploy.md) | 部署到 Mac mini：运行环境布局、步骤、验证、回滚 |
 | [patches.md](patches.md) | 现行补丁与已移除补丁：为什么、上游状态、何时移除 |
 | [records/](records/README.md) | 修订记录 |
+| [Ollo GTD 正式切换方案](records/2026-10-14-ollo-gtd-production-switch.md) | 待执行：真实任务/清单切换、离线 plan/apply/rollback、授权节点、验证与回滚 |
 | [../hermes-plugins/](../hermes-plugins/README.md) | Ollo 服务端插件源码 |
 
 ## 规则

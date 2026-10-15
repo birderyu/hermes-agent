@@ -23,5 +23,7 @@
 | 2026-10-11 | [Ollo 语气开关归并](2026-10-11-ollo-mood-toggle.md) | 已提交 `14f2be2480`；保留 v0.21.6 流适配；语气改由 Ollo 网关分类后，ollo-conversation 随 ollo-bridge 上线停用 |
 | 2026-10-11 | [Ollo bridge 源码与宿主挂接](2026-10-11-ollo-bridge.md) | 已提交 `1bbb986596`、`14f2be2480`；插件 391/0、cron 1485 过/11 既有跳过；六轮跨仓库对账无阻塞项 |
 | 2026-10-11 | [部署 ollo-bridge](2026-10-11-ollo-bridge-deploy.md) | 运行目录到 `23cc01830d`（含撤回 Photon 补丁）；停用三个旧 ollo 插件；4 个测试任务投 Ollo、只读「Ollo 测试·*」；真机联合验收待 App 0.1.0 (9) |
+| 2026-10-14 | [Ollo GTD 正式切换方案与工具](2026-10-14-ollo-gtd-production-switch.md) | 仅开发准备、待执行；真实四任务保持身份并改投 Ollo，测试任务/Skill 备份后删除；沙箱行为测试未能启动 |
+| 2026-10-15 | [EventKit 失败诊断与只读结构检查](2026-10-15-ollo-eventkit-diagnostics.md) | 未提交/未部署；prepare/commit 脱敏诊断、一次 WARNING、只读 inspect；完整 bridge 测试被沙箱阻止，待沙箱外验证 |
 
 新记录的文件名用 `YYYY-MM-DD-<主题>.md`，写清：做了什么、涉及哪些提交、冲突怎么解决、测试结果（含与官方基线的对照）、部署与验证、没验证到的地方。
