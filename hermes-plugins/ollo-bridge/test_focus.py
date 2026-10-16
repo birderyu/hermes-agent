@@ -152,23 +152,14 @@ def test_historical_focus_stays_with_report_date_not_confirmation_date(focus):
     assert result == before and document == before
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize('truncated', [False, True])
-async def test_context_retains_focus_without_guessing_today_or_fetching_apple(bridge, gateway, focus, truncated):
-    context = example('context-focus-confirmed')
-    row = context['reports'][0]
-    row.update(truncated=truncated, body='' if truncated else '不可变旧正文，不代表最新重点')
-    gateway.routes[('GET', '/internal/v1/context')] = (200, context)
-    before = bridge.db.get_messages('tip')
-    result = await bridge.manager.ainvoke_hook('pre_llm_call', session_id='tip', task_id='task',
-                                             turn_id='turn', platform='api_server', user_message='今天做什么')
-    text = result[0]['context']
-    assert '暂不可用' not in text and '该报告已确认的重点：' in text
-    assert 'fixture-reminder-1' in text and '日期请读完整报告核对' in text
-    assert '今天已确认的重点：' not in text and '不改提醒事项' in text
-    assert json.dumps(context, ensure_ascii=False, separators=(',', ':')) in text
-    assert bridge.db.get_messages('tip') == before
-    assert [(method, path) for method, path, _, _ in gateway.calls] == [('GET', '/internal/v1/context')]
+def test_compact_context_retains_legacy_selection_without_injecting_raw_body(service):
+    module = import_module(service.base + '.day_context')
+    report = example('report-focus-confirmed')['report']
+    value = json.loads(module.compact_context(datetime.fromisoformat('2026-10-13T08:00+08:00'),
+                                            None, None, [report]))
+    assert value['reports'][0]['focus_confirmed'] == report['focus_confirmed']
+    assert value['reports'][0]['writable'] is False
+    assert 'raw_body' not in value['reports'][0] and 'body' not in value['reports'][0]
 
 
 @pytest.mark.asyncio
@@ -182,6 +173,10 @@ async def test_agenda_confirmation_is_contract_error_before_claim_or_apple(
     service.protocol.validate('B_BridgeConfirmation', document)
     cid, run_id = document['confirmation_id'], document['run_id']
     path = '/internal/v1/schedule/confirmations/' + cid
+    report_path = '/internal/v1/reports/' + document['confirmation']['report_id']
+    legacy = example('report-focus-confirmed')
+    legacy['report']['id'] = document['confirmation']['report_id']
+    gateway.routes[('GET', report_path)] = (200, legacy)
     gateway.routes[('GET', path)] = (upstream_status, document if upstream_status == 200 else {
         'code': 'invalid_request', 'message': '请改用 focus 接口', 'retryable': False})
     bridge.api._active_run_agents[run_id] = SimpleNamespace(session_id='tip', _current_task_id='task', _current_turn_id='turn')
@@ -200,7 +195,8 @@ async def test_agenda_confirmation_is_contract_error_before_claim_or_apple(
         result = json.loads(await integration.safe(integration.confirmation)({'confirmation_id': cid}))
         assert result == {'error': {'code': 'invalid_request', 'message': 'invalid_request', 'retryable': False}}
         service.apple.group.assert_not_called()
-        assert [(method, route) for method, route, _, _ in gateway.calls] == [('GET', path), ('GET', path)]
+        assert all(method == 'GET' for method, *_ in gateway.calls)
+        assert [route for _, route, _, _ in gateway.calls].count(path) == 2
     finally:
         task.set_result(None)
         await asyncio.sleep(0)

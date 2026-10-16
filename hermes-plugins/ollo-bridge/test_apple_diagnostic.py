@@ -22,10 +22,12 @@ def diagnostic(phase):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('phase', ['prepare', 'commit'])
-@pytest.mark.parametrize('kind', ['group', 'capture'])
+@pytest.mark.parametrize('kind', ['group', 'complete', 'capture'])
 async def test_diagnostic_warning_keeps_classification_receipts_and_replay(service, gateway, caplog, phase, kind):
     safe = diagnostic(phase)
-    raw = {**safe, 'fields': ['title', 'list', PRIVATE, 'item', None, {'notes': PRIVATE}],
+    if kind == 'complete':
+        safe.update(op='complete', fields=[])
+    raw = {**safe, 'fields': [*safe['fields'], PRIVATE, 'item', None, {'notes': PRIVATE}],
            'title': PRIVATE, 'notes': PRIVATE, 'list': PRIVATE, 'id': PRIVATE, 'localizedDescription': PRIVATE,
            'underlyingError': {**safe['underlyingError'], 'localizedDescription': PRIVATE,
                                'userInfo': {'notes': PRIVATE}, 'underlyingError': {'domain': PRIVATE, 'code': 9}}}
@@ -34,9 +36,11 @@ async def test_diagnostic_warning_keeps_classification_receipts_and_replay(servi
     backend.processes.run = AsyncMock(return_value=(1, json.dumps(helper).encode()))
     service.api.apple = backend
     ops = Operations(gateway)
-    if kind == 'group':
+    if kind in {'group', 'complete'}:
         document = example('confirmation')
         change = {'op': 'update', 'item': 'fixture-reminder-1', 'title': PRIVATE, 'list': '工作', 'by': 'user'}
+        if kind == 'complete':
+            change = {'op': 'complete', 'item': 'fixture-reminder-1', 'by': 'user'}
         group = {**document['groups'][0], 'indices': [0], 'changes': [change]}
         document['confirmation']['changes'] = [change]
         document['groups'] = [group]

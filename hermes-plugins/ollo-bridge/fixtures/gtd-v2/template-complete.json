@@ -1,0 +1,7 @@
+{
+  "op": "complete",
+  "item": {
+    "$draft": "item"
+  },
+  "by": "user"
+}

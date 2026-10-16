@@ -128,6 +128,9 @@ class AppleBackend:
         originals = permit['originals']
         if not ids <= originals.keys():
             return [{'index': i, 'status': 'skipped', 'reason': '缺少生成时原值，未执行'} for i in group['indices']]
+        if any(c['op'] == 'complete' and (originals[c['item']].get('source') != 'reminder'
+               or originals[c['item']].get('completed') is not False) for c in group['changes']):
+            return [{'index': i, 'status': 'skipped', 'reason': '完成操作仅支持原值未完成的提醒事项'} for i in group['indices']]
         # The native helper re-reads the entire dependency group before staging.
         # An empty originals map is valid only for create-only groups.
         result = await self.call({'method': 'apply', 'changes': group['changes'],

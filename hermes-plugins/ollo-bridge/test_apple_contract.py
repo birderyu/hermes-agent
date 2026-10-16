@@ -160,7 +160,8 @@ def test_offline_schema_references_and_runtime_roots_resolve(service):
     # Public entrypoints invoked directly by code need to exist even when no
     # bridge schema refers to them. check_schema alone does not resolve $refs.
     documents = [service.protocol._SCHEMA]
-    documents.extend(service.protocol.schema(name) for name in ('P_GTDResult', 'P_GTDSuggestion'))
+    documents.extend(service.protocol.schema(name) for name in (
+        'P_GTDResult', 'P_GTDSuggestion', 'P_OlloCards', 'P_OlloReportCardsInput', 'P_DayPlan'))
     for document in documents:
         Draft202012Validator.check_schema(document)
         uri = 'urn:ollo:bridge:offline-schema'

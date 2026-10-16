@@ -15,8 +15,14 @@ pytest_plugins = ['ollo_bridge_test_support']
 
 
 @pytest.fixture
-def collector(service):
-    return import_module(service.base + '.collector')
+def collector(service, gateway):
+    module = import_module(service.base + '.collector')
+    day = module.datetime.now(module.ZONE).date().isoformat()
+    gateway.routes[('GET', '/internal/v1/schedule/agenda/' + day)] = (200, {
+        'business_date': day, 'status': 'not_generated', 'report_id': None, 'execution_id': None, 'trigger_id': None})
+    gateway.routes[('GET', '/internal/v1/location/latest')] = (200, {'point': None})
+    gateway.routes[('GET', '/internal/v1/reports')] = (200, {'reports': [], 'has_more': False})
+    return module
 
 
 @pytest.mark.parametrize('kind,days', [('agenda', 1), ('inbox', 1), ('review', 7)])
@@ -25,12 +31,12 @@ def test_scope_and_window_match_gtd_rules(collector, kind, days):
     request = collector.collect_request({}, kind, now)
     assert request['method'] == 'collect'
     assert request['lists'] == (['收件箱'] if kind == 'inbox' else ['收件箱', '工作', '生活', '家庭', '等待', '长期'])
-    assert request['calendars'] == ([] if kind == 'inbox' else ['工作', '生活', '家庭'])
+    assert request['calendars'] == ([] if kind == 'inbox' else 'all')
     start, end = (datetime.fromisoformat(request[k]) for k in ('start', 'end'))
     assert start == (now if kind == 'review' else now.replace(hour=0))
     assert (end - start).total_seconds() == days * 86400
     # There is no due-date filter for reminders, including old overdue and undated.
-    assert set(request) == {'method', 'lists', 'calendars', 'apple', 'start', 'end'}
+    assert set(request) == {'method', 'lists', 'calendars', 'apple', 'start', 'end', 'include_completed_today', 'plan_item_ids'}
 
 
 def test_collector_uses_shanghai_day_and_explicit_scope_overrides(collector):
@@ -39,7 +45,7 @@ def test_collector_uses_shanghai_day_and_explicit_scope_overrides(collector):
     request = collector.collect_request(config, 'agenda', datetime.fromisoformat('2026-10-11T18:00:00Z'))
     assert request['start'] == '2026-10-12T00:00:00+08:00'
     assert request['end'] == '2026-10-13T00:00:00+08:00'
-    assert request['lists'] == ['工作'] and request['calendars'] == []
+    assert request['lists'] == ['工作'] and request['calendars'] == 'all'
     assert request['apple']['lists']['工作'] == 'Ollo 测试·工作'
 
 
@@ -48,7 +54,7 @@ def collected(count=1):
              'title': '保留原文😀', 'list': '工作', 'due': None, 'modified_at': '2026-10-11T08:00:00+08:00'}
             for i in range(count)]
     return {'items': rows, 'originals': {row['id']: {k: v for k, v in row.items() if k not in {'id', 'exists'}} for row in rows},
-            'collected_at': '2026-10-11T08:00:00+08:00'}
+            'collected_at': '2026-10-11T08:00:00+08:00', 'missing_plan_item_ids': []}
 
 
 @pytest.mark.parametrize('count', [0, 500, 501])
@@ -87,10 +93,35 @@ def test_stdout_is_one_complete_utf8_document(collector, bridge, monkeypatch, ca
     assert collector.main('agenda', bridge.home) == 0
     output = capsys.readouterr()
     assert output.err == '' and output.out.count('\n') == 1
-    assert json.loads(output.out) == value
+    assert all(json.loads(output.out)[key] == item for key, item in value.items())
     if count:
         assert '保留原文😀' in output.out
     runner.assert_called_once()
+
+
+@pytest.mark.parametrize('kind', ['agenda', 'inbox', 'review'])
+def test_legacy_config_collects_without_optional_fields_or_migration(collector, bridge, monkeypatch, capsys, kind):
+    path = bridge.home / 'ollo/bridge.json'
+    before = path.read_bytes()
+    assert not {'collection', 'knowledge'} & json.loads(before).keys()
+    config = collector.read_config(bridge.home)
+    assert config.knowledge == {'places': None}
+    runner = Mock(return_value=SimpleNamespace(returncode=0,
+        stdout=json.dumps(collected(0)).encode('utf-8'), stderr=b''))
+    monkeypatch.setattr(collector.subprocess, 'run', runner)
+
+    assert collector.main(kind, bridge.home) == 0
+    output = capsys.readouterr()
+    assert output.err == ''
+    value = json.loads(output.out)
+    assert value['plan'] is None and value['location']['place'] is None
+    runner.assert_called_once()
+    request = json.loads(runner.call_args.kwargs['input'])
+    assert request['lists'] == (['收件箱'] if kind == 'inbox' else ['收件箱', '工作', '生活', '家庭', '等待', '长期'])
+    assert request['calendars'] == ([] if kind == 'inbox' else 'all')
+    assert request['include_completed_today'] is (kind == 'inbox')
+    assert request['plan_item_ids'] == []
+    assert path.read_bytes() == before
 
 
 @pytest.mark.parametrize('failure', ['timeout', 'permission', 'overflow', 'invalid_json', 'missing_helper'])
@@ -120,7 +151,7 @@ def test_collector_failure_has_no_success_stdout(collector, bridge, monkeypatch,
 
 @pytest.mark.platforms('macos')
 @pytest.mark.parametrize('kind', ['agenda', 'inbox', 'review'])
-def test_installed_entry_runs_via_host_once_without_keys_or_tools(bridge, monkeypatch, kind):
+def test_installed_entry_requires_owning_credential_without_starting_helper(bridge, monkeypatch, kind):
     from cron import scheduler, scheduler_script
     from cron.lifecycle_guard import check_gateway_lifecycle
     scripts = bridge.home / 'scripts'
@@ -137,20 +168,17 @@ def test_installed_entry_runs_via_host_once_without_keys_or_tools(bridge, monkey
     config = json.loads(path.read_text())
     config['helper_path'] = str(helper)
     path.write_text(json.dumps(config), encoding='utf-8')
-    (bridge.home / 'ollo/bridge.key').unlink()  # Collection has no HTTP/auth need.
+    (bridge.home / 'ollo/bridge.key').unlink()  # Authenticated gateway reads must fail closed.
     entry = f'ollo_collect_{kind}.py'
     check_gateway_lifecycle('Generate the GTD report.', script=entry)
     ok, output = scheduler_script._run_job_script(entry)
-    assert ok and json.loads(output) == result
-    captured = json.loads(helper.with_suffix('.request').read_text())
-    assert captured['argv'] == [str(helper)] and captured['request']['method'] == 'collect'
-    assert captured['request']['calendars'] == ([] if kind == 'inbox' else ['工作', '生活', '家庭'])
-    assert scheduler._parse_wake_gate(output) is True
+    assert not ok and 'Ollo collection failed:' in output
+    assert not helper.with_suffix('.request').exists()
     rerun = Mock(side_effect=AssertionError('script must only execute once'))
     monkeypatch.setattr(scheduler_script, '_run_job_script', rerun)
     job = {'id': 'fixture', 'prompt': 'Generate the GTD report.', 'script': entry, 'enabled_toolsets': []}
-    prompt = scheduler._build_job_prompt(job, prerun_script=(ok, output))
-    assert prompt.count(output) == 1 and 'Script Output' in prompt
+    prompt = scheduler._build_job_prompt(job, prerun_script=(True, json.dumps(result)))
+    assert prompt.count(json.dumps(result)) == 1 and 'Script Output' in prompt
     rerun.assert_not_called()
     assert scheduler._resolve_cron_enabled_toolsets(job, {'mcp_servers': {'any': {}}}) == []
     failure = scheduler._build_job_prompt(job, prerun_script=(False, 'Ollo collection failed: helper_failed'))

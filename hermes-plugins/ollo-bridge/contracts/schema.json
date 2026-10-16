@@ -36,7 +36,8 @@
           "minLength": 1,
           "maxLength": 128000,
           "pattern": "\\S",
-          "x-max-utf8-bytes": 128000
+          "x-max-utf8-bytes": 128000,
+          "description": "收到的完整 raw body；允许末尾一个 ollo-card v1 围栏，并允许 hermes-plus-gtd v1/v2 锚点围栏。无需新增投递字段；bridge 完整保留原文、不删除控制围栏，网关先解析再清理展示正文，规则引用公共 OlloReportCardsInput/GTDReport；原字节预算不变。 报告卡片可省略 anchor（含写入卡），由网关入箱时填为本报告 id；无需定时任务预知 UUID。"
         },
         "business_date": {
           "$ref": "#/$defs/B_ISODate"
@@ -48,7 +49,7 @@
           "$ref": "#/$defs/B_DeliveryKind"
         }
       },
-      "description": "仅 live adapter 与宿主持久 delivery queue；身份/执行开始时间来自可信宿主。agenda 必须带 business_date（由任务时区和原执行日期确定），wake 时带 trigger_id；网关按 job 白名单判类别，不能相信模型日期。保留最后 GTD 原围栏，缺 UUID/可信日期拒收；执行早于部署截点则 409/stale_execution。 gtd.kind 必须匹配白名单类别，否则按坏结构降级纯文本，不从模型输出修改任务类别。 delivery_kind 必填且来自宿主本次执行的可信失败标记。failure 忽略所有 GTD 围栏，公开 body 为「没有生成」、gtd=null；原 body 可保存为不可变 raw_body，但不进入锁屏，不占 agenda 日账、不触发 suppressed，兜底正常生成。report 中仅带合法 gtd.kind=agenda 的 agenda 报告占用当天成功日账；缺失或坏结构降级的纯文字 agenda report 照常入箱和推送，不占日账。 当天已有成功报告时，后来的任何 agenda report（包括纯文字）仍被 suppressed。"
+      "description": "仅 live adapter 与宿主持久 delivery queue；身份/执行开始时间来自可信宿主。agenda 必须带 business_date（由任务时区和原执行日期确定），wake 时带 trigger_id；网关按 job 白名单判类别，不能相信模型日期。保留最后 GTD 原围栏，缺 UUID/可信日期拒收；执行早于部署截点则 409/stale_execution。 gtd.kind 必须匹配白名单类别，否则按坏结构降级纯文本，不从模型输出修改任务类别。 delivery_kind 必填且来自宿主本次执行的可信失败标记。failure 忽略所有 GTD 围栏，公开 body 为「没有生成」、gtd=null；原 body 可保存为不可变 raw_body，但不进入锁屏，不占 agenda 日账、不触发 suppressed，兜底正常生成。report 中仅带合法 gtd.kind=agenda 的 agenda 报告占用当天成功日账；缺失或坏结构降级的纯文字 agenda report 照常入箱和推送，不占日账。 当天已有成功报告时，后来的任何 agenda report（包括纯文字）仍被 suppressed。 GTD v2 原始块必须带 originals；ollo-card 解析失败仅使 cards=null。failure 同时忽略 ollo-card，cards=null。卡片写入 anchor 按已保存报告身份与生成时原值校验，不能使用占位符或由模型猜测报告 UUID。 省略 anchor 的卡片使用本次报告身份，入箱事务内补齐并按生成时 originals 校验；显式 anchor 不覆盖、不能跨 binding；raw_body 保留原文。返回 Report.cards 一律带 anchor，消息卡片的写入仍要求显式 anchor。"
     },
     "B_UUID": {
       "$ref": "#/$defs/P_UUID"
@@ -135,7 +136,35 @@
       ],
       "properties": {
         "report": {
-          "$ref": "#/$defs/B_Report"
+          "$ref": "#/$defs/B_Report",
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "gtd": {
+                    "type": "object",
+                    "properties": {
+                      "version": {
+                        "const": 2
+                      }
+                    },
+                    "required": [
+                      "version"
+                    ]
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "gtd": {
+                    "required": [
+                      "originals"
+                    ]
+                  }
+                }
+              }
+            }
+          ]
         },
         "raw_body": {
           "type": "string",
@@ -145,7 +174,7 @@
           "pattern": "\\S"
         }
       },
-      "description": "report.gtd 含完整已保存 originals；report.focus_confirmed 同公共报告，为网关保存的最新重点（缺失/null 为尚未确认）。raw_body 是收到的不可变原文，含围栏，不会随重点变化；使用 focus_confirmed 而不是 preselected 判断用户选择。重点只是对话背景，不授权 Apple 变更。"
+      "description": "report.gtd 含完整已保存 originals；report.focus_confirmed 同公共报告，为网关保存的最新重点（缺失/null 为尚未确认）。raw_body 是收到的不可变原文，含围栏，不会随重点变化；使用 focus_confirmed 而不是 preselected 判断用户选择。重点只是对话背景，不授权 Apple 变更。 v2 的 report.cards 按公共 OlloCards 解释；focus_confirmed 仅 v1。"
     },
     "B_Report": {
       "$ref": "#/$defs/P_Report"
@@ -180,7 +209,7 @@
           "minLength": 0,
           "maxLength": 128000,
           "x-max-utf8-bytes": 128000,
-          "description": "展示正文；移除所有顶层 hermes-plus-gtd 与 hermes-plus-gtd-result 围栏，包括坏块和未闭合块。结构无效仍降级为 gtd=null，不能回捞更早块；清理后为空时使用报告标题、换行及固定文字「没有生成」。raw_body 保留收到的不可变原文，仅供内部排查，不向 App 展示。"
+          "description": "展示正文；移除所有顶层 hermes-plus-gtd 与 hermes-plus-gtd-result 围栏，包括坏块和未闭合块。结构无效仍降级为 gtd=null，不能回捞更早块；清理后为空时使用报告标题、换行及固定文字「没有生成」。raw_body 保留收到的不可变原文，仅供内部排查，不向 App 展示。 ollo-card 顶层围栏同样全部移除，恰好一个有效块才得到 cards；详细降级规则见 OlloCards。"
         },
         "created_at": {
           "$ref": "#/$defs/P_UnixSeconds"
@@ -230,7 +259,31 @@
               "type": "null"
             }
           ],
-          "description": "网关保存的重点；缺失/null 表示尚未确认，不能从 preselected 或旧 agenda GTDConfirmation 推断。只在合法 agenda 报告上有值，所有设备共享。"
+          "description": "网关保存的重点；缺失/null 表示尚未确认，不能从 preselected 或旧 agenda GTDConfirmation 推断。只在合法 agenda 报告上有值，所有设备共享。 仅 gtd.version=1；v2 不使用重点固定页面。"
+        },
+        "cards": {
+          "anyOf": [
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/P_OlloCardList"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "anchor"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "已校验的 OlloCards.cards 数组；缺失或 null 表示无有效卡片，旧数据允许省略。解析与整组降级规则见 OlloCards；不是围栏外层对象。 非 null 时每张卡片 anchor 必须已填好；输入省略时指向该报告自身 id，不能把未补齐的输入数组直接返回。"
         }
       },
       "description": "id/Unix 秒沿用 InboxReport，URL 仍用 report_id；只保存切换后新报告。gtd_kind/gtd_counts 如返回必须与 gtd 一致，坏结构为 null；originals 可从 App 响应省略。 delivery_kind 必须返回；failure 为纯文字「没有生成」、gtd=null（gtd_kind/gtd_counts 如返回也为 null），标题来自可信任务类别，不占 agenda 日账、不被同日成功报告 suppressed。delivery_kind=report 的 agenda 仅在带有合法结构化 gtd 且 gtd.kind=agenda 时占用当天成功日账；缺失或坏结构降级的纯文字报告照常入箱和推送，不占日账，后续兜底仍可生成。 当天日账已有成功报告时，后来的任何 agenda report（包括纯文字）均 suppressed，不重复入箱或推送。",
@@ -249,11 +302,15 @@
               "gtd": {
                 "type": "object",
                 "required": [
+                  "version",
                   "kind"
                 ],
                 "properties": {
                   "kind": {
                     "const": "agenda"
+                  },
+                  "version": {
+                    "const": 1
                   }
                 }
               },
@@ -388,6 +445,9 @@
               },
               "body": {
                 "const": "没有生成"
+              },
+              "cards": {
+                "type": "null"
               }
             }
           }
@@ -425,7 +485,10 @@
       "properties": {
         "version": {
           "type": "integer",
-          "const": 1
+          "enum": [
+            1,
+            2
+          ]
         },
         "kind": {
           "$ref": "#/$defs/P_GTDKind"
@@ -458,87 +521,157 @@
           "$ref": "#/$defs/P_GTDOriginals"
         }
       },
-      "description": "hermes-plus-gtd v1：取最后一个顶层围栏；缺失/坏块整份降级为 gtd=null，不能回捞更早块。展示正文一律去掉报告/结果围栏，包含坏块与未闭合块；清理后为空则显示报告标题与「没有生成」，原文仅在内部 raw_body 保留。所有引用/原值关系及重复 item ID 由业务验证。 GTD 主事项、agenda、关联事项、建议、候选与变更中的标题均最多 4096 UTF-8 字节；originals 标题无损保存。字段扩容不放宽投递 body 的 128000 UTF-8 字节总限额。",
+      "description": "hermes-plus-gtd v1/v2：取最后一个顶层围栏；缺失/坏块整份降级为 gtd=null，不能回捞更早块。展示正文一律去掉报告/结果围栏，包含坏块与未闭合块；清理后为空则显示报告标题与「没有生成」，原文仅在内部 raw_body 保留。所有引用/原值关系及重复 item ID 由业务验证。 GTD 主事项、agenda、关联事项、建议、候选与变更中的标题均最多 4096 UTF-8 字节；originals 标题无损保存。字段扩容不放宽投递 body 的 128000 UTF-8 字节总限额。 version=2 仍保留 kind/generated_at/counts 作为类别、采集时间和通知数量元数据；复用 GTDItem/items 与 GTDOriginals/originals 作为写入锚点，不再承载 agenda.focus 等固定页面，agenda 只能省略/null。v2 agenda 的 items 可非空；v2 review 不要求旧页面 group。最小兼容改动保留 GTDItem 的现有字段，App 对 v2 不按 suggestion/findings 等生成旧页面，只渲染 cards。v1 原有约束不变。v2 原始投递及内部 BridgeReport 必须含同次采集的 originals（可为空对象），App 读取仍可省略；此方向差异由入箱校验处理。允许引用只能由 items 的明确引用确定，不能靠往 originals 塞 ID 扩权。",
       "allOf": [
         {
           "if": {
             "properties": {
-              "kind": {
-                "const": "inbox"
+              "version": {
+                "const": 1
               }
             }
           },
           "then": {
-            "properties": {
-              "counts": {
-                "$ref": "#/$defs/P_GTDInboxCounts"
-              },
-              "agenda": {
-                "type": "null"
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "kind": {
-                "const": "agenda"
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "counts": {
-                "$ref": "#/$defs/P_GTDAgendaCounts"
-              },
-              "agenda": {
-                "$ref": "#/$defs/P_GTDAgenda"
-              },
-              "items": {
-                "maxItems": 0
-              }
-            },
-            "required": [
-              "agenda"
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "kind": {
-                "const": "review"
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "counts": {
-                "$ref": "#/$defs/P_GTDReviewCounts"
-              },
-              "agenda": {
-                "type": "null"
-              },
-              "items": {
-                "items": {
-                  "required": [
-                    "group"
-                  ],
+            "allOf": [
+              {
+                "if": {
                   "properties": {
-                    "group": {
-                      "type": "string",
-                      "enum": [
-                        "overdue",
-                        "waiting",
-                        "someday",
-                        "next7"
-                      ]
+                    "kind": {
+                      "const": "inbox"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "counts": {
+                      "$ref": "#/$defs/P_GTDInboxCounts"
+                    },
+                    "agenda": {
+                      "type": "null"
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "kind": {
+                      "const": "agenda"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "counts": {
+                      "$ref": "#/$defs/P_GTDAgendaCounts"
+                    },
+                    "agenda": {
+                      "$ref": "#/$defs/P_GTDAgenda"
+                    },
+                    "items": {
+                      "maxItems": 0
+                    }
+                  },
+                  "required": [
+                    "agenda"
+                  ]
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "kind": {
+                      "const": "review"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "counts": {
+                      "$ref": "#/$defs/P_GTDReviewCounts"
+                    },
+                    "agenda": {
+                      "type": "null"
+                    },
+                    "items": {
+                      "items": {
+                        "required": [
+                          "group"
+                        ],
+                        "properties": {
+                          "group": {
+                            "type": "string",
+                            "enum": [
+                              "overdue",
+                              "waiting",
+                              "someday",
+                              "next7"
+                            ]
+                          }
+                        }
+                      }
                     }
                   }
                 }
               }
-            }
+            ]
+          },
+          "else": {
+            "properties": {
+              "agenda": {
+                "type": "null"
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "kind": {
+                      "const": "agenda"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "counts": {
+                      "$ref": "#/$defs/P_GTDAgendaCounts"
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "kind": {
+                      "const": "inbox"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "counts": {
+                      "$ref": "#/$defs/P_GTDInboxCounts"
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "kind": {
+                      "const": "review"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "counts": {
+                      "$ref": "#/$defs/P_GTDReviewCounts"
+                    }
+                  }
+                }
+              }
+            ]
           }
         }
       ]
@@ -1279,12 +1412,43 @@
               ]
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "item"
+          ],
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "complete"
+            },
+            "item": {
+              "$ref": "#/$defs/P_ItemID"
+            },
+            "by": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "hermes",
+                    "user"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
         }
       ],
       "discriminator": {
         "propertyName": "op"
       },
-      "description": "6 种操作，拒绝无关字段；可选字段省略/null 都表示不改，不支持用 null 清空（兼容 Core Optional）。update 至少一个非 null 改动；merge 的 item≠into 由业务校验。create 的省略/null 在幂等指纹中等价。"
+      "description": "7 种操作，拒绝无关字段；可选字段省略/null 都表示不改，不支持用 null 清空（兼容 Core Optional）。update 至少一个非 null 改动；merge 的 item≠into 由业务校验。create 的省略/null 在幂等指纹中等价。 complete 将提醒事项标记为完成，不适用于日历事件；item 必须属于报告允许引用集，且生成时 originals 中该项 source=reminder、completed=false，缺原值不得签发许可。"
     },
     "P_GTDDate": {
       "oneOf": [
@@ -1604,7 +1768,7 @@
           "maximum": 10000
         }
       },
-      "description": "所有 focus ID 唯一，预选数 ≤ focus_limit；counts 与读取时的数据一致，均由业务验证。"
+      "description": "所有 focus ID 唯一，预选数 ≤ focus_limit；counts 与读取时的数据一致，均由业务验证。 仅供 GTDReport.version=1 的固定页面；v2 不使用此对象。"
     },
     "P_GTDAgendaEvent": {
       "type": "object",
@@ -1841,6 +2005,1368 @@
         }
       },
       "description": "按报告 focus 顺序的 ID 集合及网关确认的 Unix 秒（可含小数）；相同集合重放不刷新时间。独立于不可变报告，不是 Apple 写入授权。"
+    },
+    "P_OlloCardList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/P_OlloCard"
+      },
+      "minItems": 1,
+      "maxItems": 4,
+      "description": "OlloCards.cards 的共同定义；Message/Report 直接返回此数组或 null，不复制外层 version。 Report 对每个元素额外要求已填好的 anchor。"
+    },
+    "P_OlloCard": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "blocks"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/P_OlloID"
+        },
+        "replaces": {
+          "$ref": "#/$defs/P_OlloID"
+        },
+        "status": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 12,
+          "pattern": "\\S",
+          "x-max-utf8-bytes": 48
+        },
+        "anchor": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "report_id"
+          ],
+          "properties": {
+            "report_id": {
+              "$ref": "#/$defs/P_UUID"
+            }
+          }
+        },
+        "blocks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P_OlloBlock"
+          },
+          "minItems": 1,
+          "maxItems": 30
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "blocks": {
+                "contains": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "type"
+                      ],
+                      "properties": {
+                        "type": {
+                          "const": "confirm"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "buttons"
+                      ],
+                      "properties": {
+                        "type": {
+                          "const": "buttons"
+                        },
+                        "buttons": {
+                          "contains": {
+                            "type": "object",
+                            "required": [
+                              "action"
+                            ],
+                            "properties": {
+                              "action": {
+                                "type": "object",
+                                "required": [
+                                  "type"
+                                ],
+                                "properties": {
+                                  "type": {
+                                    "enum": [
+                                      "write",
+                                      "confirm"
+                                    ]
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "options"
+                      ],
+                      "properties": {
+                        "type": {
+                          "const": "choices"
+                        },
+                        "options": {
+                          "contains": {
+                            "type": "object",
+                            "required": [
+                              "changes"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "required": [
+              "blocks"
+            ]
+          },
+          "then": {
+            "required": [
+              "anchor"
+            ]
+          }
+        },
+        {
+          "properties": {
+            "blocks": {
+              "contains": {
+                "type": "object",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "const": "buttons"
+                  }
+                }
+              },
+              "minContains": 0,
+              "maxContains": 1
+            }
+          }
+        }
+      ],
+      "description": "同一对话的卡片 ID 唯一；replaces 指向同一对话已有卡，不能等于自身，不得成环、跨归属或指向不存在的卡。替换在旧卡原位发生，新消息只显示文字；替换沿链定位，旧草稿不能套用新卡。每卡至多一个 buttons 行（因此显式按钮总数 ≤3、prominent ≤1）；confirm 零件默认呈现「再看看/确认」；如提供显式 buttons 行则复用其 confirm/compose 动作，不重复画默认按钮。消息卡片中任何 write/confirm、confirm 零件或选项 changes 都要求显式 anchor。anchor 报告必须已存在且属于本 binding；对话卡仅允许当天 agenda 或最近 inbox/review；报告入箱允许省略 anchor，按 OlloReportCardsInput 由网关补为该报告 id；返回的 Report.cards 每张都带 anchor，补齐不授予写入许可。report_id 必须是已知 UUID，禁止占位符或从模型猜 ID。允许引用集与生成时 originals 照旧核对；有 anchor 不等于已有执行许可。"
+    },
+    "P_OlloID": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 40,
+      "pattern": "^[a-z0-9-]{1,40}$(?![\\s\\S])",
+      "x-max-utf8-bytes": 40,
+      "description": "卡片、零件、按钮的稳定标识。卡片 ID 在同一对话唯一；date/choices 零件 ID 在本卡唯一；按钮 ID 在本卡唯一。唯一性由网关校验。"
+    },
+    "P_OlloBlock": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "text",
+            "style"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "text"
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "pattern": "\\S",
+              "x-max-utf8-bytes": 800
+            },
+            "style": {
+              "type": "string",
+              "enum": [
+                "body",
+                "headline",
+                "footnote"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "date",
+            "rows"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "plan"
+            },
+            "date": {
+              "$ref": "#/$defs/P_ISODate"
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/P_PlanRow"
+              },
+              "minItems": 1,
+              "maxItems": 24
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "title"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "item"
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "\\S",
+              "x-max-utf8-bytes": 4096
+            },
+            "detail": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "pattern": "\\S",
+              "x-max-utf8-bytes": 800
+            },
+            "icon": {
+              "$ref": "#/$defs/P_OlloIcon"
+            },
+            "tint": {
+              "$ref": "#/$defs/P_OlloTint"
+            },
+            "item_id": {
+              "$ref": "#/$defs/P_ItemID"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "text",
+            "kind"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "done"
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "pattern": "\\S",
+              "x-max-utf8-bytes": 800
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "done",
+                "note"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "label",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "date"
+            },
+            "id": {
+              "$ref": "#/$defs/P_OlloID"
+            },
+            "label": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40,
+              "pattern": "\\S",
+              "x-max-utf8-bytes": 160
+            },
+            "value": {
+              "$ref": "#/$defs/P_GTDDate"
+            },
+            "icon": {
+              "$ref": "#/$defs/P_OlloIcon"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "options",
+            "multiple",
+            "selected"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "choices"
+            },
+            "id": {
+              "$ref": "#/$defs/P_OlloID"
+            },
+            "options": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "label"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "\\S",
+                    "x-max-utf8-bytes": 512,
+                    "description": "选项稳定值，可作为 DraftRef 替换值；同一 choices 零件内唯一。"
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 40,
+                    "pattern": "\\S",
+                    "x-max-utf8-bytes": 160
+                  },
+                  "icon": {
+                    "$ref": "#/$defs/P_OlloIcon"
+                  },
+                  "changes": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/P_GTDConfirmedChangeTemplate"
+                    },
+                    "minItems": 1,
+                    "maxItems": 100
+                  }
+                }
+              },
+              "minItems": 2,
+              "maxItems": 6
+            },
+            "multiple": {
+              "type": "boolean"
+            },
+            "selected": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "\\S",
+                "x-max-utf8-bytes": 512
+              },
+              "minItems": 0,
+              "maxItems": 6,
+              "uniqueItems": true
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "multiple": {
+                    "const": false
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "selected": {
+                    "maxItems": 1
+                  }
+                }
+              }
+            }
+          ],
+          "description": "selected 是选项 ID 数组；每个 ID 必须属于 options，options ID 唯一，由网关校验。未选可为空；单选被 DraftRef 引用时必须恰选一个。选项 changes 仅在选中且用户点 write/confirm 时加入；选择本身不写入。"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "buttons"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "buttons"
+            },
+            "buttons": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/P_OlloButton"
+              },
+              "minItems": 1,
+              "maxItems": 3,
+              "contains": {
+                "type": "object",
+                "required": [
+                  "style"
+                ],
+                "properties": {
+                  "style": {
+                    "const": "prominent"
+                  }
+                }
+              },
+              "minContains": 0,
+              "maxContains": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "summary",
+            "changes"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "confirm"
+            },
+            "summary": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "pattern": "\\S",
+              "x-max-utf8-bytes": 800
+            },
+            "changes": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/P_GTDConfirmedChangeTemplate"
+              },
+              "minItems": 1,
+              "maxItems": 100
+            }
+          },
+          "description": "渲染「再看看」「确认」；确认按本卡 confirm action 语义执行，零件自身也构成写入入口；消息卡须显式 anchor，报告输入可省略，由网关入箱时补齐。"
+        }
+      ],
+      "discriminator": {
+        "propertyName": "type"
+      },
+      "description": "按 type 互斥的八种原生零件，未知 type 或多余字段使整组卡片无效；无脚本、HTML、URL 或任意工具执行入口。未单列限额的展示文字按本 schema：detail/done/summary 200 字，date/choices label 40 字，选项 ID 128 字/512 UTF-8 字节，图标 128 ASCII 字节。"
+    },
+    "P_PlanRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "time"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "task",
+            "event",
+            "travel",
+            "done",
+            "now"
+          ]
+        },
+        "time": {
+          "$ref": "#/$defs/P_OlloTime"
+        },
+        "end": {
+          "$ref": "#/$defs/P_OlloTime"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "\\S",
+          "x-max-utf8-bytes": 4096
+        },
+        "duration_minutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1440,
+          "description": "估计持续分钟数，最多一天；不能超出本日。"
+        },
+        "place": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 12,
+          "pattern": "\\S",
+          "x-max-utf8-bytes": 48
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 12,
+          "pattern": "\\S",
+          "x-max-utf8-bytes": 48
+        },
+        "item_id": {
+          "$ref": "#/$defs/P_ItemID"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "now"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "end"
+                  ]
+                },
+                {
+                  "required": [
+                    "title"
+                  ]
+                },
+                {
+                  "required": [
+                    "duration_minutes"
+                  ]
+                },
+                {
+                  "required": [
+                    "place"
+                  ]
+                },
+                {
+                  "required": [
+                    "note"
+                  ]
+                },
+                {
+                  "required": [
+                    "item_id"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "description": "五种时间线行；event 是只读日历展示，接受计划不会写日历或提醒事项；now 只能有 kind/time。title 沿用事项完整标题 4096 UTF-8 字节；place/note 各最多 12 Unicode 字符。end 必须晚于 time，duration_minutes 不跨日；跨字段时间比较由网关校验。"
+    },
+    "P_OlloTime": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 5,
+      "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$(?![\\s\\S])",
+      "description": "当天本地时间 HH:mm，分钟精度，Asia/Shanghai；不接受 24:00，不跨日。"
+    },
+    "P_OlloIcon": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9.-]*$(?![\\s\\S])",
+      "x-max-utf8-bytes": 128,
+      "description": "SF Symbol 名称，仅作为 Image(systemName:) 参数；不存在的符号不画，不是代码或资源 URL。"
+    },
+    "P_OlloTint": {
+      "type": "string",
+      "enum": [
+        "accent",
+        "gray",
+        "green",
+        "orange",
+        "red",
+        "blue",
+        "indigo",
+        "purple",
+        "yellow"
+      ]
+    },
+    "P_GTDConfirmedChangeTemplate": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "item",
+            "by"
+          ],
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "update"
+            },
+            "item": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/P_ItemID"
+                },
+                {
+                  "$ref": "#/$defs/P_DraftRef"
+                }
+              ]
+            },
+            "title": {
+              "anyOf": [
+                {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "pattern": "\\S",
+                      "x-max-utf8-bytes": 4096
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                {
+                  "$ref": "#/$defs/P_DraftRef"
+                }
+              ]
+            },
+            "list": {
+              "anyOf": [
+                {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "\\S"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                {
+                  "$ref": "#/$defs/P_DraftRef"
+                }
+              ]
+            },
+            "due": {
+              "anyOf": [
+                {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/P_GTDDate"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                {
+                  "$ref": "#/$defs/P_DraftRef"
+                }
+              ]
+            },
+            "waiting_for": {
+              "anyOf": [
+                {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "\\S"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                {
+                  "$ref": "#/$defs/P_DraftRef"
+                }
+              ]
+            },
+            "follow_up": {
+              "anyOf": [
+                {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/P_GTDDate"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                {
+                  "$ref": "#/$defs/P_DraftRef"
+                }
+              ]
+            },
+            "by": {
+              "type": "string",
+              "enum": [
+                "hermes",
+                "user"
+              ]
+            }
+          },
+          "anyOf": [
+            {
+              "required": [
+                "title"
+              ],
+              "properties": {
+                "title": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "pattern": "\\S",
+                      "x-max-utf8-bytes": 4096
+                    },
+                    {
+                      "$ref": "#/$defs/P_DraftRef"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "required": [
+                "list"
+              ],
+              "properties": {
+                "list": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "\\S"
+                    },
+                    {
+                      "$ref": "#/$defs/P_DraftRef"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "required": [
+                "due"
+              ],
+              "properties": {
+                "due": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/P_GTDDate"
+                    },
+                    {
+                      "$ref": "#/$defs/P_DraftRef"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "required": [
+                "waiting_for"
+              ],
+              "properties": {
+                "waiting_for": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "\\S"
+                    },
+                    {
+                      "$ref": "#/$defs/P_DraftRef"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "required": [
+                "follow_up"
+              ],
+              "properties": {
+                "follow_up": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/P_GTDDate"
+                    },
+                    {
+                      "$ref": "#/$defs/P_DraftRef"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "item",
+            "by"
+          ],
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "delete"
+            },
+            "item": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/P_ItemID"
+                },
+                {
+                  "$ref": "#/$defs/P_DraftRef"
+                }
+              ]
+            },
+            "by": {
+              "type": "string",
+              "enum": [
+                "hermes",
+                "user"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "item",
+            "start",
+            "minutes",
+            "calendar",
+            "by"
+          ],
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "to_event"
+            },
+            "item": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/P_ItemID"
+                },
+                {
+                  "$ref": "#/$defs/P_DraftRef"
+                }
+              ]
+            },
+            "start": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/P_ISODateTime"
+                },
+                {
+                  "$ref": "#/$defs/P_DraftRef"
+                }
+              ]
+            },
+            "minutes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10080,
+                  "description": "持续分钟数，最多 7 天。"
+                },
+                {
+                  "$ref": "#/$defs/P_DraftRef"
+                }
+              ]
+            },
+            "calendar": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "\\S"
+                },
+                {
+                  "$ref": "#/$defs/P_DraftRef"
+                }
+              ]
+            },
+            "by": {
+              "type": "string",
+              "enum": [
+                "hermes",
+                "user"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "item",
+            "into",
+            "by"
+          ],
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "merge"
+            },
+            "item": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/P_ItemID"
+                },
+                {
+                  "$ref": "#/$defs/P_DraftRef"
+                }
+              ]
+            },
+            "into": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/P_ItemID"
+                },
+                {
+                  "$ref": "#/$defs/P_DraftRef"
+                }
+              ]
+            },
+            "title": {
+              "anyOf": [
+                {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096,
+                      "pattern": "\\S",
+                      "x-max-utf8-bytes": 4096
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                {
+                  "$ref": "#/$defs/P_DraftRef"
+                }
+              ]
+            },
+            "by": {
+              "type": "string",
+              "enum": [
+                "hermes",
+                "user"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "item",
+            "start",
+            "by"
+          ],
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "update_event"
+            },
+            "item": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/P_ItemID"
+                },
+                {
+                  "$ref": "#/$defs/P_DraftRef"
+                }
+              ]
+            },
+            "start": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/P_ISODateTime"
+                },
+                {
+                  "$ref": "#/$defs/P_DraftRef"
+                }
+              ]
+            },
+            "minutes": {
+              "anyOf": [
+                {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 10080,
+                      "description": "持续分钟数，最多 7 天。"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                {
+                  "$ref": "#/$defs/P_DraftRef"
+                }
+              ]
+            },
+            "by": {
+              "type": "string",
+              "enum": [
+                "hermes",
+                "user"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "title",
+            "list",
+            "by"
+          ],
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "create_reminder"
+            },
+            "title": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096,
+                  "pattern": "\\S",
+                  "x-max-utf8-bytes": 4096
+                },
+                {
+                  "$ref": "#/$defs/P_DraftRef"
+                }
+              ]
+            },
+            "list": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "\\S"
+                },
+                {
+                  "$ref": "#/$defs/P_DraftRef"
+                }
+              ]
+            },
+            "due": {
+              "anyOf": [
+                {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/P_GTDDate"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                {
+                  "$ref": "#/$defs/P_DraftRef"
+                }
+              ]
+            },
+            "alarm": {
+              "anyOf": [
+                {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/P_GTDDate"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                {
+                  "$ref": "#/$defs/P_DraftRef"
+                }
+              ]
+            },
+            "by": {
+              "type": "string",
+              "enum": [
+                "hermes",
+                "user"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "item",
+            "by"
+          ],
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "complete"
+            },
+            "item": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/P_ItemID"
+                },
+                {
+                  "$ref": "#/$defs/P_DraftRef"
+                }
+              ]
+            },
+            "by": {
+              "type": "string",
+              "enum": [
+                "hermes",
+                "user"
+              ]
+            }
+          }
+        }
+      ],
+      "discriminator": {
+        "propertyName": "op"
+      },
+      "description": "GTDConfirmedChange 的卡片模板，七种 op、必填字段、by 和无关字段拒绝规则沿用执行合同；仅数据字段值允许 DraftRef。模板只能用于 write.changes、confirm.changes、choices.options[].changes；禁止直接作为 GTDConfirmation 或 bridge 写入许可。完成替换并加入选中选项 changes 后总计 1–100 项，必须再通过 GTDConfirmedChange/GTDConfirmation 与锚点/原值核对；不能在 op/by 中延迟选择执行意图。 complete 模板仅有 op/item/by；item 可引用单选草稿，所有候选事项均须为报告允许引用、originals 中未完成的提醒事项。"
+    },
+    "P_DraftRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "$draft"
+      ],
+      "properties": {
+        "$draft": {
+          "$ref": "#/$defs/P_OlloID"
+        }
+      },
+      "description": "仅允许在 GTDConfirmedChangeTemplate 的数据字段值位置出现，整个值必须为 {\"$draft\":\"<block id>\"}，不接受插值、路径或嵌套表达式。op/by 固定，不接受 DraftRef；item/into 如引用草稿，替换后仍须属于锚点报告的允许引用集。只引用同一卡片唯一的 date/choices 零件：date 得到 GTDDate 字符串；choices 得到选中选项的 id（multiple=false 必须恰选一个），multiple=true 得到按 options 顺序的 id 数组。替换后必须通过原 GTDConfirmedChange schema，现有标量字段不接受多选数组。引用不存在、非 date/choices、空单选或类型不匹配时整张卡无效。跨字段引用、选择成员和替换结果由网关在入箱/历史解析时及提交确认时校验，schema 本身不能比较实例中的 ID。"
+    },
+    "P_OlloButton": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "style",
+        "action"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/P_OlloID"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8,
+          "pattern": "\\S",
+          "x-max-utf8-bytes": 32
+        },
+        "icon": {
+          "$ref": "#/$defs/P_OlloIcon"
+        },
+        "style": {
+          "type": "string",
+          "enum": [
+            "prominent",
+            "secondary"
+          ]
+        },
+        "action": {
+          "$ref": "#/$defs/P_OlloAction"
+        }
+      }
+    },
+    "P_OlloAction": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "accept_plan"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "changes"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "write"
+            },
+            "changes": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/P_GTDConfirmedChangeTemplate"
+              },
+              "minItems": 1,
+              "maxItems": 100
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "confirm"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "text"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "say"
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "\\S",
+              "x-max-utf8-bytes": 4096
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "compose"
+            },
+            "prefill": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 4096,
+              "pattern": ".*",
+              "x-max-utf8-bytes": 4096
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "dismiss"
+            }
+          }
+        }
+      ],
+      "discriminator": {
+        "propertyName": "type"
+      },
+      "description": "accept_plan 使用本卡唯一 plan 零件及最新 revision 保存网关计划；confirm 使用本卡唯一 confirm 零件；这两种关联由网关校验，缺少或多于一个目标零件时无效。write 是按钮本身的明确确认，单项改动使用 write，多项改动使用 confirm 零件；消息 write/confirm 均须显式 anchor，报告输入可省略并由网关补齐。say 发送普通用户消息；compose 只预填并聚焦；dismiss 仅本机收起。write/confirm 替换草稿并按零件/选项顺序追加所有选中选项的 changes，最终 1–100 项；未选选项不执行，冲突/重复或类型不符由确认链拒绝，不静默丢弃。"
     },
     "B_BridgeReportPage": {
       "type": "object",
@@ -2548,7 +4074,7 @@
           "maxItems": 100
         }
       },
-      "description": "indices 与 changes 一一对应原确认，保留组内顺序；共享 item/into 形成连通依赖组，整组原值核对后暂存并一次 commit。"
+      "description": "indices 与 changes 一一对应原确认，保留组内顺序；共享 item/into 形成连通依赖组，整组原值核对后暂存并一次 commit。 changes 引用公共 GTDConfirmedChange，包含 complete；仅提醒事项可完成，item 必须在允许引用集中且 originals.source=reminder、completed=false。执行前再次读取并核对原值，已完成或原值变化则整组 skipped；done 只由真实完成回执产生。"
     },
     "B_GTDConfirmedChange": {
       "$ref": "#/$defs/P_GTDConfirmedChange"
@@ -2574,7 +4100,7 @@
           }
         }
       ],
-      "description": "只有确认中的改动要求 by；建议中的 Change 不要求。by 不参与业务去重。"
+      "description": "只有确认中的改动要求 by；建议中的 Change 不要求。by 不参与业务去重。 complete 的 by 同样必填 user/hermes；语义校验与其他确认共用报告范围和原值守卫。"
     },
     "B_BridgeConfirmation": {
       "type": "object",
@@ -2655,7 +4181,7 @@
           "maxItems": 100
         }
       },
-      "description": "hermes-plus-gtd-confirm：用户仅授权此报告列明的改动，最多 100 项；item/into 必须属于报告允许引用集。按报告+依赖组规范操作持久去重，排除 by/组外排序。 A7（2026-10-12 决定）：kind=agenda 不再用于确认今日重点，改用 PUT /v1/inbox/reports/{report_id}/focus； kind 枚举仅为读取旧历史保留 agenda。新的对话提交（包括旧幂等键重提）收到 agenda 确认一律 400/invalid_request，说明改用 focus 接口， 在调用 Agent 或返回旧回执前拒绝，不把旧 update due 动作自动转换成重点，以免误解既有 Apple 写入意图。 升级前已保存的 agenda 确认不再签发新的执行许可（claim 返回 400/invalid_request），已签发许可的 finish 仍接收以保留真实执行结果。"
+      "description": "hermes-plus-gtd-confirm：用户仅授权此报告列明的改动，最多 100 项；item/into 必须属于报告允许引用集。按报告+依赖组规范操作持久去重，排除 by/组外排序。 G1 对 A7 的版本限定：只有锚定已存 gtd.version=2 且 kind=agenda 的报告，agenda 确认才可准备/领取写入许可；确认信封自身 version 仍为 1，不以客户端声明代替报告版本。v1 agenda 的新提交（含旧幂等键）仍在调用 Agent/返回旧回执前 400/invalid_request，claim 也拒绝；今日重点继续走 PUT /v1/inbox/reports/{report_id}/focus，仅限 v1。已签发许可的 finish 仍接收真实结果。v2 agenda 也须当前白名单、允许引用集与生成时 originals 核对，报告过期/归属不符或缺原值不得放行。 C17：inbox/review 报告的 job_id 不在当前运行配置 bridge.jobs 白名单时，报告已停用；确认消息仍正常受理并由 Agent 回复， 不在 POST 对话消息阶段因停用返回 400。领取层不签发新的写入许可：尚未执行的组得到确定的 skipped 结果，每项 reason 固定为「报告已停用」，不调用 Apple。 白名单修改后重启网关生效，无新增配置项。已签发许可的执行中/未知状态及真实完成回执保留，迟到 finish 照常核对并落库，不伪造为未改。 停用不影响报告读取、已读及 agenda 的 focus 保存；focus 只写网关，不授予 Apple 写入许可。 卡片模板必须先解析 DraftRef，GTDConfirmation 的 changes 只接收实际值，不接收模板。"
     },
     "B_GTDOriginals": {
       "$ref": "#/$defs/P_GTDOriginals"
@@ -2702,7 +4228,8 @@
         "originals": {
           "$ref": "#/$defs/B_GTDOriginals"
         }
-      }
+      },
+      "description": " complete 与其他操作复用此许可，网关签发前检查报告引用与未完成的提醒事项原值；helper 不得将日历事件 complete 或缺失/已完成的 originals 当作合法操作。"
     },
     "B_BridgeOperationPermit": {
       "oneOf": [
@@ -2760,7 +4287,7 @@
               "maxItems": 100
             }
           },
-          "description": "整组执行已得到确定回执，可含 done/skipped/failed，索引与领取的组精确匹配。"
+          "description": "整组已得到确定回执，可含 done/skipped/failed，索引与确认组精确匹配。C17 报告停用时也可由网关直接生成全部 skipped、reason=报告已停用的确定结果；这不是执行许可，也不表示 Apple 已写入。"
         },
         {
           "type": "object",
@@ -2833,6 +4360,7 @@
     },
     "P_GTDResultEntry": {
       "type": "object",
+      "description": "C17：报告所属任务已从运行配置白名单移除时，被拒绝执行的每一项为 status=skipped、reason=报告已停用；不能标 done 或结果未知。 complete 复用 index/status/reason 结果；done 表示已标记完成，skipped/failed 按真实执行回执返回，不添加 op 字段，不将模型文字视为完成证明。",
       "additionalProperties": false,
       "required": [
         "index",
@@ -3438,6 +4966,114 @@
       },
       "description": "Hermes 隔离理解调用，禁用工具、不写对话/记忆；超时保留 App 原答案。"
     },
+    "B_DayPlan": {
+      "$ref": "#/$defs/P_DayPlan"
+    },
+    "P_DayPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "date",
+        "card_id",
+        "report_id",
+        "rows",
+        "accepted_at",
+        "updated_at",
+        "revision"
+      ],
+      "properties": {
+        "date": {
+          "$ref": "#/$defs/P_ISODate"
+        },
+        "card_id": {
+          "$ref": "#/$defs/P_OlloID"
+        },
+        "report_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/P_UUID"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P_PlanRow"
+          },
+          "minItems": 1,
+          "maxItems": 24
+        },
+        "accepted_at": {
+          "$ref": "#/$defs/P_ISODateTime"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/P_ISODateTime"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        }
+      },
+      "description": "每 binding/ISO 日期唯一的一份已接受计划，binding_id 留在存储中，不接受请求指定也不对外暴露。首次接受 revision=1，accepted_at 为首次接受 ISO 时刻，后续替换保留 accepted_at、更新 updated_at，revision 严格加一；所有设备与 bridge 读同一记录。revision 非时间且不回绕，达到上限返回 409/request_id_conflict。report_id 无值时返回 null。"
+    },
+    "B_BridgeLatestLocationPoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "latitude",
+        "longitude",
+        "accuracy",
+        "timestamp"
+      ],
+      "properties": {
+        "latitude": {
+          "type": "number",
+          "minimum": -90,
+          "maximum": 90,
+          "description": "WGS84 纬度，度。"
+        },
+        "longitude": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180,
+          "description": "WGS84 经度，度。"
+        },
+        "accuracy": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000,
+          "description": "水平精度，米。"
+        },
+        "timestamp": {
+          "$ref": "#/$defs/B_UnixSeconds"
+        }
+      },
+      "description": "最新自动设备点，坐标 WGS84 度、accuracy 米、timestamp 为原始 Unix 采样秒。允许超过 120 秒的历史点，不沿用按需定位 LocationPoint 的新鲜度上限；采样未来最多 10 秒。字段数值与 LocationPoint 相同，年龄与授权仍须业务校验。"
+    },
+    "B_BridgeLatestLocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "point"
+      ],
+      "properties": {
+        "point": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/B_BridgeLatestLocationPoint"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "description": "point 为最新仍授权自动设备点或 null；不返回 token/grant/session 信息，不产生定位副作用。"
+    },
     "P_GTDResult": {
       "type": "object",
       "additionalProperties": false,
@@ -3465,6 +5101,112 @@
         }
       },
       "description": "hermes-plus-gtd-result：允许 sparse 结果，但 index 必须唯一且在对应 changes 范围内；跨记录约束由业务验证，不能用整对象 uniqueItems 代替。只有真实执行回执可标 done。"
+    },
+    "P_OlloCards": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "cards"
+      ],
+      "properties": {
+        "version": {
+          "type": "integer",
+          "const": 1
+        },
+        "cards": {
+          "$ref": "#/$defs/P_OlloCardList"
+        }
+      },
+      "description": "ollo-card v1 围栏载体；正文末尾至多一个顶层 ollo-card 围栏。顶层沿用 hermes-plus-gtd 的 Markdown 围栏识别：行首最多三空格、至少三反引号或波浪线，info 去空白后严格为 ollo-card；代码示例内嵌的围栏不是顶层，不取出、不过滤。所有顶层 ollo-card 块从展示正文移除，含坏 JSON、无效 schema、未知版本、超限及未闭合块（移除至 EOF）；历史、报告 body、reply.delta 使用相同规则。只有恰好一个完整且通过 schema/语义校验的块才得到 cards；多个顶层块即整组无效，即便其中只有一个有效也不取最后一个、不回捞。任何一张卡无效则整组 cards=null，不部分保留；无块同样 null。独立于 hermes-plus-gtd 的最后顶层块解析规则，坏卡不抹掉有效 gtd 锚点。围栏去除后沿用现有正文空值回退规则。原文只在内部 raw_body 保存。 消息使用本 schema；报告原围栏使用 OlloReportCardsInput，网关在入箱事务内补齐省略的 anchor 后按本 schema 与报告上下文重新校验。"
+    },
+    "P_OlloReportCardsInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "cards"
+      ],
+      "properties": {
+        "version": {
+          "type": "integer",
+          "const": 1
+        },
+        "cards": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/$defs/P_OlloReportCardInput"
+          }
+        }
+      },
+      "description": "报告原文 ollo-card v1 输入载体；围栏识别、末尾唯一块、大小限制和整组降级规则与 OlloCards 一致。只在报告入箱事务中为每张省略 anchor 的卡填入本报告真实 id（只读卡也填）；原始 raw_body 不变。补齐后重新校验 OlloCards 及业务关联，任何失败整组 cards=null。返回 Report.cards 一律使用已补齐的数组。"
+    },
+    "P_OlloReportCardInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "blocks"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/P_OlloID"
+        },
+        "replaces": {
+          "$ref": "#/$defs/P_OlloID"
+        },
+        "status": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 12,
+          "pattern": "\\S",
+          "x-max-utf8-bytes": 48
+        },
+        "anchor": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "report_id"
+          ],
+          "properties": {
+            "report_id": {
+              "$ref": "#/$defs/P_UUID"
+            }
+          }
+        },
+        "blocks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P_OlloBlock"
+          },
+          "minItems": 1,
+          "maxItems": 30
+        }
+      },
+      "allOf": [
+        {
+          "properties": {
+            "blocks": {
+              "contains": {
+                "type": "object",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "const": "buttons"
+                  }
+                }
+              },
+              "minContains": 0,
+              "maxContains": 1
+            }
+          }
+        }
+      ],
+      "description": "仅报告投递原文中的卡片输入。anchor 可省略，包括 write/confirm、confirm 零件与选项 changes；省略时网关在入箱事务内填为本报告 id，随后验证本报告允许引用集及 originals。显式 anchor 不覆盖，须为同 binding/conversation 的已有成功报告（允许本报告）。null、空对象、占位符仍无效。不可用于消息；不表示用户已确认或已领取写入许可。"
     }
   }
 }

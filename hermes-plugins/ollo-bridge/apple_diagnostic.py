@@ -4,7 +4,7 @@ import logging
 
 
 logger = logging.getLogger(__name__)
-OPERATIONS = {'update', 'delete', 'merge', 'to_event', 'update_event', 'create_reminder', 'capture', 'batch', 'unknown'}
+OPERATIONS = {'update', 'delete', 'merge', 'to_event', 'update_event', 'create_reminder', 'complete', 'capture', 'batch', 'unknown'}
 FIELDS = {'title', 'list', 'due', 'waiting_for', 'follow_up', 'calendar', 'start', 'minutes', 'alarm', 'notes', 'url'}
 
 

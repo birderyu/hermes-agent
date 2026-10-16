@@ -1,5 +1,16 @@
 # Ollo bridge
 
+## GTD v2 / G4（2026-10-16，开发候选）
+
+本轮仅开发副本，未部署/重启/提交/推送。当前采集、上下文和部署规则以 [G4 安装与回滚](docs/gtd-v2-install.md) 为准；下方 A/D 阶段记录保留历史证据，不代表 v2 已上线。
+
+- 采集全部可读事件日历，保留日历名/地点/全天/订阅/起止；inbox 加入当天完成项和任意清单中的计划引用，全部同次 originals。
+- 读网关已接受计划与最新自动位置；只读 `knowledge.places` 指定单篇地点笔记。agenda 首先查日账，成功日输出 `wakeAgent:false`，复用宿主跳过模型和投递。
+- Ollo 绑定对话注入当前时间、计划、报告允许项和位置，动态资料6000字符；超限逐项省略并标明。v2 agenda 确认核对报告版本后沿现有许可链，v1仍拒绝。
+- 完整候选：[gtd](docs/gtd-skill-v2-candidate.md)、[hermes-plus-gtd](docs/hermes-plus-gtd-v2-candidate.md)、[四任务 prompt](docs/cron-prompts-v2-candidate.md)。当前 G1 缺完成操作和首次报告自锚点，候选明确给出可用替代与联调依赖，不能宣称「交好了」或首次晚间 confirm 已端到端可用。
+- Swift优化构建/签名/自检已通过；9个卡片示例通过导出的G1 schema。标准Python测试受沙箱权限阻断，0项收集，不是通过；命令与待验收项见安装文档和 [维护记录](../../custom/records/2026-10-16-gtd-v2-hermes.md)。
+
+
 2026-10-14：初次测试部署见 [10-11 记录](../../custom/records/2026-10-11-ollo-bridge-deploy.md)。用户提供的验收现状及真实任务/真实清单切换步骤见 [正式切换方案](../../custom/records/2026-10-14-ollo-gtd-production-switch.md)。本次只准备工具和文档，未访问运行 home、部署或重启。下文 D/A 阶段的“候选/未部署”和测试计数是历史开发记录，不代表当前线上状态。
 
 唯一的 Hermes 侧薄插件。网关负责报告、设备/位置、APNs、日程业务回执；本插件只适配 HTTP、可信会话、cron 与 Apple 执行。没有报告/位置/回执数据库，不调用旧插件迁移，不导入旧数据。旧 `ollo-inbox`、`ollo-location`、`ollo-conversation` 源码目录保留；切换时停用旧注册项。
@@ -17,7 +28,7 @@
 | `schedule.py` | wake/capture/capture lookup/items/interpret、claim/finish、确认分组与真实回执 |
 | `wake.py`、`cron_lock.py` | 在宿主任务锁中检查暂停、持久 wake 意图与当日去重 |
 | `apple.py`、`helper_process.py`、`native/EventKitBridge.swift`、`native/Info.plist` | 固定 JSON 子进程协议、活动 request_id 登记、普通请求 7 秒、换清单 55 秒自退看门狗；批量读取、捕获核对、AppleScript move 与单次 EventKit commit |
-| `apple_config.py`、`collector.py`、`scripts/ollo_collect*.py` | 名称对应表与采集范围校验；只读 collect、三个 cron 入口及共用加载器，独立于插件注册与密钥 |
+| `apple_config.py`、`collector.py`、`scripts/ollo_collect*.py` | 名称对应表与采集范围校验；只读 collect、三个 cron 入口及共用加载器，独立于插件注册；v2 网关读取使用所属 Profile 的 bridge 凭据 |
 | `scripts/production_switch.py`、`scripts/production_switch_io.py`、`test_production_switch.py` | 正式切换的只读预检、离线备份/切换/回滚及合成状态测试；不操作 Ollo 网关或 Apple |
 | `contracts/schema.json`、`contracts/export_schema.py`、`contracts/README.md` | 当前合同的本地引用闭包、维护导出脚本与来源摘要 |
 | `fixtures/*.json` | 42 份合成 bridge 合同样例，含 A2 lookup/in_progress 与 A4 failure 报告 |
@@ -80,6 +91,7 @@ Telegram 话题路由及原 relay 测试已恢复，未搬移。相关记录见 
   "name": "Ollo",
   "gateway_url": "http://127.0.0.1:8765",
   "helper_path": "/ABSOLUTE/OPERATOR/CHOSEN/ollo-eventkit",
+  "knowledge": {"places": "/ABSOLUTE/OPERATOR/CHOSEN/常去地点.md"},
   "jobs": {
     "EXISTING_WEEKDAY_AGENDA_JOB": {"title": "今日安排", "kind": "agenda"},
     "EXISTING_WEEKEND_AGENDA_JOB": {"title": "今日安排", "kind": "agenda"},
@@ -95,9 +107,9 @@ Telegram 话题路由及原 relay 测试已恢复，未搬移。相关记录见 
     "calendars": {"工作": "工作", "生活": "生活", "家庭": "家庭"}
   },
   "collection": {
-    "agenda": {"lists": ["收件箱", "工作", "生活", "家庭", "等待", "长期"], "calendars": ["工作", "生活", "家庭"]},
+    "agenda": {"lists": ["收件箱", "工作", "生活", "家庭", "等待", "长期"], "calendars": "all"},
     "inbox": {"lists": ["收件箱"], "calendars": []},
-    "review": {"lists": ["收件箱", "工作", "生活", "家庭", "等待", "长期"], "calendars": ["工作", "生活", "家庭"]}
+    "review": {"lists": ["收件箱", "工作", "生活", "家庭", "等待", "长期"], "calendars": "all"}
   }
 }
 ```
@@ -197,21 +209,21 @@ capture 的 URL 固定为 `ollo://capture/<request_id>`，不写进标题或备�
 
 联合验收可将实际值设为 `Ollo 测试·收件箱`、`Ollo 测试·工作` 等，逻辑键和 collection 不变。capture 固定写 `lists[收件箱]`；apply 的 list/calendar 目标经过同一表；collect/items/originals 将已映射实际名还原为逻辑名，表外实际名原样返回。确认前重新读取也做同样转换后比较 originals。lookup 为核对历史 URL 仍扫描全部清单，不被测试表限制。配置变化须在停止相关工作后重载插件；脚本每次读取配置，不能在 helper/报告/确认进行中切换名称对应表。
 
-`collection.<kind>.lists/calendars` 是逻辑名数组，可局部配置，未知名/重复名/空 lists 拒绝。它只选择范围，不改限额或提示词业务规则；正式四任务保持默认六清单/三日历，测试用 apple 映射隔离。时间按 Asia/Shanghai：
+v2 的 `collection.<kind>.lists` 仍是逻辑名数组；agenda/review 的 calendars 为 `"all"`，旧三日历数组（包括空数组）解析后同样读全部，不能用名称映射隔离日历读取范围。仅写入目标仍是那三个映射。inbox 默认 calendars=[]，不要求事件权限。时间为 Asia/Shanghai：
 
-| 入口 | 未完成提醒 | 日历窗口 |
+| 入口 | 提醒 | 日历窗口 |
 | --- | --- | --- |
-| `ollo_collect_agenda.py` | 六清单全部，包括任意久的超期、未来到期、无日期项；模型再选今日及重点 | 当天 00:00 至次日 00:00，三日历 |
-| `ollo_collect_inbox.py` | 仅收件箱 | 不读日历，也不要求日历权限 |
-| `ollo_collect_review.py` | 六清单全部 | 采集开始时刻起七天，三日历 |
+| `ollo_collect_agenda.py` | 六清单全部未完成，加当天计划引用项 | 当天00:00至次日00:00，全部可读事件日历 |
+| `ollo_collect_inbox.py` | 收件箱未完成，所有清单当天完成，任意清单计划引用 | 默认不读日历 |
+| `ollo_collect_review.py` | 六清单全部未完成，加当天计划引用项 | 采集时刻起七天，全部可读事件日历 |
 
-helper 一次读取选中提醒集合、一次读取选中日历集合；先过滤已完成提醒，再计算未完成提醒+日历事件总数，**500 项为硬上限**。501 项报 `collection_limit_exceeded`，不截断、不返回空成功。权限不足、缺失/重复名称、读取超时、重复事项 ID 或不完整结果同样失败。items 和同次 originals 保留完整原值，stdout 恰好一份紧凑 UTF-8 `{items,originals,collected_at}`；零项也输出非空 JSON。采集输出另有 16 MiB 总预算，超限失败，不截数据。报告 v1 的 100 项数组/128000 字节正文限额独立存在，采集成功不等于一定能生成合法报告。
+helper 一次读取提醒集合、一次读取事件集合；筛选后500项硬上限，超限/权限/超时/歧义明确失败。helper 返回 `{items,originals,collected_at,missing_plan_item_ids}`；collector 添加日期/星期/workday/plan/location/reports；输出16MiB上限，零项也输出非空JSON。v2报告100项/128000字节上限另由报告合同约束。completed=true原值用于收尾展示，不授权再次修改完成项。
 
-安装时复制**普通文件**，不要软链接到仓库：从插件 `scripts/` 复制 `ollo_collect.py`、`ollo_collect_agenda.py`、`ollo_collect_inbox.py`、`ollo_collect_review.py` 到当前 Profile 的 `<HERMES_HOME>/scripts/` 根目录，用户拥有且其他用户不可写。同时安装完整插件到该 home 的 `plugins/ollo-bridge/`，包含 `collector.py` 和 `apple_config.py`；配置绝对 `helper_path` 指向已编译的 helper。三个入口从自身安装路径确定所属 home，仅加载 stdlib collector，不执行插件注册、不读 key。任务 script 仅填表中的文件名，无命令行参数；Python 由宿主 PM/任务 interpreter 选择，脚本不需要 executable 位。
+安装时复制四个 `scripts/ollo_collect*.py` 普通文件到所属 Profile 的 scripts 根目录，完整插件和新版helper一同安装。入口从自身安装路径确定home，不执行插件注册。v2不再是stdlib/免密钥采集，需宿主PM Python提供aiohttp/jsonschema，内部用所属home的bridge凭据认证只读HTTP。配置绝对helper_path；任务script只填文件名，无CLI参数。具体形状/笔记/预算/原值/回滚见 [G4文档](docs/gtd-v2-install.md)。
 
 已核验的宿主语义：`cron/scheduler_script.py` 的 `_resolve_script_path/_script_argv/_run_job_script`，`cron/lifecycle_guard.py` 的 script 解析，`scheduler.py` 的 pre-run gate，以及 `scheduler_prompt.py::_build_job_prompt`。相对路径从 owning home/scripts 解析，绝对路径/软链接最终也必须位于此目录；script 字段不是 shell 命令。子进程使用宿主 `build_subprocess_env(strip_launch_profile=True)` 的过滤环境及所属 Profile HERMES_HOME，没有额外 job/run/原调度时间参数或环境变量。cwd 为任务 workdir 或脚本目录；stdout/stderr 经宿主脱敏。脚本总超时由既有 HERMES_CRON_SCRIPT_TIMEOUT/cron.script_timeout_seconds 决定，默认 3600 秒；本采集器调用 helper 自行限 6 秒并 kill/reap，helper 另有独立 7 秒看门狗，采集不重试。宿主取消/超时还会终止脚本进程树。
 
-预执行 stdout 缓存后只注入一次 Script Output，prompt 构建不会再执行。成功但空 stdout 会跳过模型，故零事项也不能输出空白；显式 `enabled_toolsets: []` 阻止宿主合并 MCP 工具。**普通 agent cron 的脚本非零退出/超时只会注入 Script Error，仍调用模型，不会自动变成 for_failure。** 候选提示词明确报未生成且不输出假空卡片，但成功完成的模型回复仍按 report 投递，可能消耗 agenda 日账；此保证必须联调并单独解决，不能把提示词当失败状态挂接。`no_agent=true` 虽会直接传播脚本失败，却不满足本次由无工具模型生成报告的需求。
+预执行 stdout 缓存后只注入一次 Script Output，prompt 构建不会再执行。成功但空 stdout 会跳过模型，故零事项也不能输出空白；显式 `enabled_toolsets: []` 阻止宿主合并 MCP 工具。**普通 agent cron 的脚本非零退出/超时只会注入 Script Error，仍调用模型，不会自动变成 for_failure。** 候选提示词明确报未生成且不输出假空卡片，但成功完成的模型回复仍按 report 投递；现合同规定缺失/降级gtd的纯文字报告不占成功日账，但这仍不是宿主for_failure挂接，须联调验证。`no_agent=true` 虽会直接传播脚本失败，却不满足本次由无工具模型生成报告的需求。
 
 脚本无法读取可信原 wake 日期，窗口取实际采集时间；外层 business_date/trigger_id 仍来自当次执行快照。跨午夜延迟启动时两者可能不同，需要确定过期执行处置后上线。本轮未新增或扩大宿主补丁。
 

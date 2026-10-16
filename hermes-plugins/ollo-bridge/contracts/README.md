@@ -1,6 +1,18 @@
+# 离线合同导出
+
+2026-10-16 G4：本轮从 Ollo 工作区未提交的 G1 合同重新导出 schema.json，新增显式入口 OlloCards/DayPlan 及所有传递引用。运行时只读此本地闭包，不访问 Ollo 仓库。导出器原被根目录 `export*` 忽略，已在本目录用精确例外纳入可审阅文件。
+
+G4b 已从补齐后的合同重新导出，当前支持 GTDReport v2、OlloCards、OlloReportCardsInput、PlanRow、DayPlan、BridgeLatestLocation 及 complete。9 个候选卡片示例用标明的输入 schema 离线校验通过，其中 6 个报告示例省略 anchor；补上合成报告 ID 后也通过 OlloCards。`test_gtd_v2.py` 会再次验证三份候选的全部 ollo-card JSON。schema 校验不证明锚点真实存在/引用可写/替换关系/实际执行；G5须补语义和端到端验收。
+
+complete 执行形状为 op/item/by，模板中的 item 可用 DraftRef。源为 event 或生成时已完成/缺失原值属于业务拒绝，schema 合法本身不能授予执行。确认组、backend 与 helper 均检查该边界；完成和其他改动复用原有依赖组许可、单次 commit 和真实回执。
+
+报告原文使用 OlloReportCardsInput，省略的 anchor 由网关入箱事务填本报告 ID，再按 OlloCards 和 items/originals 校验；消息写入卡仍按 OlloCards，必须显式 anchor。两种入口不能互换，省略不等于 null/self/占位符。`fixtures/gtd-v2/` 同步 6 份新的合成合同样例，`test_completion.py` 覆盖输入区别及完成操作。
+
+v2 agenda 执行会先读锚定报告，必须 kind=agenda 且 version=2；v1仍拒绝。部署须同步 G1/G2 支持的端点、插件/helper/技能/prompt，不能沿用下面A7“先bridge后网关”历史说明直接切v2采集。
+
 运行校验使用 Ollo bridge 0.2.0-draft 合同的离线 schema 闭包；B_ 为 bridge、P_ 为公共模型。不运行时读取其他仓库，也不远程解析引用。
 
-`export_schema.py` 导出全部 bridge 模型，加上插件直接调用的公共入口 `GTDResult`、`GTDSuggestion`，递归收齐依赖并将引用改为本地 `$defs`。当前含 A2 capture lookup、A4 delivery_kind、A5 GTD 标题/originals 4096 UTF-8 字节限制、A6 日期规则与 A7 重点记忆，共 102 个定义。仅从 bridge 的 `$ref` 出发会漏掉确认结果的 `P_GTDResult`；它是 Python 直接校验的入口，不被 bridge 模型引用。
+`export_schema.py` 导出全部 bridge 模型，加上插件直接调用或候选示例校验的公共入口 `GTDResult`、`GTDSuggestion`、`OlloCards`、`OlloReportCardsInput`、`DayPlan`，递归收齐依赖并将引用改为本地 `$defs`。当前共 121 个定义。仅从 bridge 的 `$ref` 出发会漏掉 `P_GTDResult` 与纯报告原文输入等入口；这些需要显式加入导出根。
 
 在已激活的 Hermes 开发环境中，从仓库根目录重新生成（参数为 Ollo 源合同目录）：
 
@@ -28,3 +40,13 @@ GTDConfirmation 仍保留 agenda 供旧历史解码；新写入/旧确认领取�
 - `openapi.yaml`: `b5e1d070cf95268507b0bbbf8f91a1170c9ea4822694236aa4f8e246d1dff5e6`
 
 fixtures 保留 2026-10-11 的 42 份合成合同样例，并同步 A7 的 `report-focus-confirmed`、`context-focus-confirmed` 两份，共 44 份，不是用户数据；A6 日期和 A7 未确认/非法选择边界由测试构造。合同更新时重新导出并审阅语义，禁止只更新散列。
+
+G1 源文件 SHA-256（本轮读取的未提交工作区快照）：
+
+- `bridge.openapi.yaml`: `a4f663b731e7ffdd77411670c6a0f2054c5b6aa7a78f1a8fc440c3d995870e14`
+- `openapi.yaml`: `a7230394c29b3e093e90fae89fe72e890653884ba85e3b895a7386f8c749154a`
+
+G4b 源文件 SHA-256（2026-10-16，当前 schema.json 对应快照）：
+
+- `bridge.openapi.yaml`: `b7f6c26d18888a2046d282f5e14f10ece76791d8ea0259b019b56dc350484fe7`
+- `openapi.yaml`: `d88f6e09ee6442844d992c00467d117171ad51d148a95768d219c98cb67a95c5`

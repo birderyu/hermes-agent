@@ -134,12 +134,13 @@ def test_bridge_python_parsers_accept_minute_precision_and_keep_original_text(se
     collector = import_module(service.base + '.collector')
     for instant in ['2026-10-12T10:00+08:00', '2026-10-12T02:00Z', '2026-10-11T22:00-04:00']:
         assert execution.business_day(instant) == '2026-10-12'
-        value = {'items': [], 'originals': {}, 'collected_at': instant}
+        value = {'items': [], 'originals': {}, 'collected_at': instant, 'missing_plan_item_ids': []}
         assert collector.validate_collection(value) == value
         assert value['collected_at'] == instant
     # Date-only is legitimate for GTD due dates, never for execution/collection stamps.
     for invalid in ['2026-10-12', '2026-10-12T10:00']:
         with pytest.raises(service.protocol.BridgeError):
             execution.business_day(invalid)
-        with pytest.raises(ValueError):
-            collector.validate_collection({'items': [], 'originals': {}, 'collected_at': invalid})
+        with pytest.raises(ValueError, match='invalid_collection_time'):
+            collector.validate_collection({'items': [], 'originals': {}, 'collected_at': invalid,
+                                           'missing_plan_item_ids': []})

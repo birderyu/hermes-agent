@@ -1,0 +1,2 @@
+# Root export* ignores maintenance source too; keep this exporter reviewable.
+!export_schema.py

@@ -2,10 +2,12 @@
 import asyncio
 import copy
 from contextvars import copy_context
+from datetime import datetime
 import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import pytest
 import pytest_asyncio
@@ -227,6 +229,30 @@ async def test_confirmation_refuses_other_tools_and_wrong_uuid(canonical, tool, 
     else:
         assert 'execute_gtd_confirmation' in str(result['error'])
     assert all('/confirmations/' not in path and '/reports' not in path for _, path, _, _ in c.gateway.calls)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('trusted_uuid', [True, False])
+async def test_confirmation_skips_day_context_until_next_plain_turn(canonical, trusted_uuid):
+    c = canonical
+    cid = example('confirmation')['confirmation_id']
+    day = datetime.now(ZoneInfo('Asia/Shanghai')).date().isoformat()
+    c.gateway.routes[('GET', '/internal/v1/schedule/agenda/' + day)] = (200, {
+        'business_date': day, 'status': 'not_generated', 'report_id': None,
+        'execution_id': None, 'trigger_id': None})
+    c.gateway.routes[('GET', '/internal/v1/location/latest')] = (200, {'point': None})
+    c.gateway.routes[('GET', '/internal/v1/reports')] = (200, {'reports': [], 'has_more': False})
+
+    await submit(c, confirm_text(), key=cid if trusted_uuid else None)
+    messages = json.dumps(c.model.calls[0]['messages'], ensure_ascii=False)
+    assert '当前回合是确认提交' in messages
+    assert (f'本轮可信 confirmation_id={cid}' if trusted_uuid else '缺少可信确认 UUID') in messages
+    assert 'Ollo 当日资料' not in messages
+    assert not c.gateway.calls
+
+    await submit(c, '现在做什么', key=str(uuid4()))
+    assert 'Ollo 当日资料' in json.dumps(c.model.calls[0]['messages'], ensure_ascii=False)
+    assert any(path.split('?')[0] == '/internal/v1/reports' for _, path, _, _ in c.gateway.calls)
 
 
 @pytest.mark.asyncio

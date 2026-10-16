@@ -180,9 +180,11 @@ class Schedule:
         document = await self._confirmation_document(confirmation_id, headers)
         validate('B_BridgeConfirmation', document)
         require(document['confirmation_id'] == confirmation_id and document['run_id'] == runtime['task_id'], 'forbidden', 403)
-        # A7 still decodes historical agenda confirmations, but they no longer
-        # authorize writes. Reject before claiming any group or replaying receipts.
-        require(document['confirmation']['kind'] != 'agenda')
+        if document['confirmation']['kind'] == 'agenda':
+            report_id = document['confirmation']['report_id']
+            report = validate('B_BridgeReport', await self.client.request('GET', '/internal/v1/reports/' + report_id))['report']
+            require(report['id'] == report_id and (report.get('gtd') or {}).get('version') == 2
+                    and report['gtd']['kind'] == 'agenda')
         self._check_groups(document)
         results = []
         receipts = {}
@@ -231,6 +233,10 @@ class Schedule:
         changes = document['confirmation']['changes']
         seen, operations, group_refs = set(), {}, []
         allowed = set(document['allowed_item_ids'])
+        for change in changes:
+            if change['op'] == 'complete':
+                original = document['originals'].get(change['item'], {})
+                require(original.get('source') == 'reminder' and original.get('completed') is False)
         for group in document['groups']:
             indices = group['indices']
             operation_id = group['operation_id']

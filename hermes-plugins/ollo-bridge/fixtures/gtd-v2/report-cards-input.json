@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "cards": [
+    {
+      "id": "complete-reminder",
+      "blocks": [
+        {
+          "type": "item",
+          "item_id": "fixture-reminder-1",
+          "title": "示例资料",
+          "tint": "orange"
+        },
+        {
+          "type": "buttons",
+          "buttons": [
+            {
+              "id": "complete",
+              "label": "交好了",
+              "style": "prominent",
+              "action": {
+                "type": "write",
+                "changes": [
+                  {
+                    "op": "complete",
+                    "item": "fixture-reminder-1",
+                    "by": "user"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "report-note",
+      "blocks": [
+        {
+          "type": "text",
+          "style": "body",
+          "text": "待确认"
+        }
+      ]
+    }
+  ]
+}

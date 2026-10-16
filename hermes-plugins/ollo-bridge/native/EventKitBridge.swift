@@ -22,7 +22,7 @@ struct MutationContext {
     let fields: [String]
     init(_ changes: [[String: Any]]) {
         let allowed: [String: Set<String>] = [
-            "update": ["title", "list", "due", "waiting_for", "follow_up"], "delete": [],
+            "update": ["title", "list", "due", "waiting_for", "follow_up"], "delete": [], "complete": [],
             "merge": ["title"], "to_event": ["calendar", "start", "minutes"],
             "update_event": ["start", "minutes"], "create_reminder": ["title", "list", "due", "alarm"],
             "capture": ["title", "list", "notes", "url"]
@@ -204,6 +204,24 @@ func stageGroup<Item>(_ changes: [[String: Any]], resolved: [String: Item],
         if ["delete", "merge", "to_event"].contains(change["op"] as? String ?? ""),
            let id = change["item"] as? String { resolved.removeValue(forKey: id) }
     }
+}
+func validCompletionOriginals(_ changes: [[String: Any]], _ originals: [String: [String: Any]]) -> Bool {
+    changes.filter { $0["op"] as? String == "complete" }.allSatisfy { change in
+        guard let id = change["item"] as? String, let original = originals[id] else { return false }
+        return original["source"] as? String == "reminder" && original["completed"] as? Bool == false
+    }
+}
+protocol CompletionTarget: AnyObject {
+    var isCompleted: Bool { get set }
+    var hasRecurrenceRules: Bool { get }
+}
+extension EKReminder: CompletionTarget {}
+func stageCompletion<Item: CompletionTarget>(_ item: Item, save: (Item) throws -> Void) throws {
+    guard !item.isCompleted, !item.hasRecurrenceRules else {
+        throw BridgeError(message: "Unsupported or completed reminder")
+    }
+    item.isCompleted = true
+    try save(item)
 }
 func hasListUpdate(_ changes: [[String: Any]]) -> Bool { !moveTargets(changes).isEmpty }
 func helperWatchdog(_ request: [String: Any]) -> UInt32 {
@@ -413,10 +431,9 @@ struct AppleNames {
         return result
     }
 }
-func collectionDocument(_ rows: [[String: Any]], at: Date) throws -> [String: Any] {
-    // Filter completion before both the limit and originals. Undated/overdue
-    // reminders stay in the input; only calendar reads have a time window.
-    let active = rows.filter { $0["source"] as? String == "event" || $0["completed"] as? Bool == false }
+func collectionDocument(_ rows: [[String: Any]], at: Date, includeCompleted: Bool = false,
+                        planIDs: Set<String> = []) throws -> [String: Any] {
+    let active = rows.filter { includeCompleted || $0["source"] as? String == "event" || $0["completed"] as? Bool == false }
     guard active.count <= 500 else { throw BridgeError(message: "collection_limit_exceeded") }
     var originals = [String: [String: Any]](), ids = Set<String>()
     for row in active {
@@ -424,7 +441,29 @@ func collectionDocument(_ rows: [[String: Any]], at: Date) throws -> [String: An
         guard ids.insert(id).inserted else { throw BridgeError(message: "Ambiguous item identifier") }
         if row["modified_at"] != nil, !(row["modified_at"] is NSNull) { originals[id] = generationOriginal(row) }
     }
-    return ["items": active, "originals": originals, "collected_at": fractional.string(from: at)]
+    return ["items": active, "originals": originals, "collected_at": fractional.string(from: at),
+            "missing_plan_item_ids": Array(planIDs.subtracting(ids)).sorted()]
+}
+
+func includeReminder(id: String, list: String, completed: Bool, completedAt: Date?,
+                     lists: Set<String>, planIDs: Set<String>, completedToday: Bool,
+                     start: Date, end: Date) -> Bool {
+    if planIDs.contains(id) { return true }
+    if !completed { return lists.contains(list) }
+    guard completedToday, let completedAt else { return false }
+    return completedAt >= start && completedAt < end
+}
+
+func eventReadIDs(_ available: [(id: String, title: String, writable: Bool)],
+                  destinations: Set<String>, all: Bool, selected: Set<String>) throws -> Set<String> {
+    // EventKit only exposes readable calendars here. Read-only/subscribed
+    // calendars must not be filtered by allowsContentModifications.
+    let targets = available.filter { destinations.contains($0.title) }
+    guard targets.count == destinations.count, Set(targets.map { $0.title }) == destinations,
+          targets.allSatisfy({ $0.writable }) else {
+        throw BridgeError(message: "Missing or ambiguous event calendars")
+    }
+    return Set(available.filter { all || selected.contains($0.title) }.map { $0.id })
 }
 func permitted(_ kind: EKEntityType) -> Bool {
     EKEventStore.authorizationStatus(for: kind) == .fullAccess
@@ -519,12 +558,17 @@ final class Bridge {
                                     "notes": item.notes ?? "", "source": item is EKReminder ? "reminder" : "event"]
         if let reminder = item as? EKReminder {
             result["completed"] = reminder.isCompleted
+            result["completed_at"] = reminder.completionDate.map { fractional.string(from: $0) } ?? null as Any
             if let dc = reminder.dueDateComponents, let date = dc.date ?? calendar.date(from: dc) {
                 result["due"] = dc.hour == nil ? day(date) : iso.string(from: date)
             }
         }
         if let event = item as? EKEvent {
             result["start"] = iso.string(from: event.startDate); result["end"] = iso.string(from: event.endDate)
+            result["calendar"] = event.calendar.title
+            result["location"] = event.location ?? ""
+            result["all_day"] = event.isAllDay
+            result["subscribed"] = event.calendar.type == .subscription
         }
         return names.snapshot(result)
     }
@@ -541,7 +585,10 @@ final class Bridge {
         return item
     }
     func event(_ item: EKCalendarItem?) throws -> EKEvent {
-        guard let item = item as? EKEvent, !item.hasRecurrenceRules else { throw BridgeError(message: "Unsupported event") }
+        guard let item = item as? EKEvent, !item.hasRecurrenceRules,
+              names.calendars.values.contains(item.calendar.title), item.calendar.allowsContentModifications else {
+            throw BridgeError(message: "Unsupported event")
+        }
         return item
     }
     func addReminder(_ change: [String: Any], notes: String = "", url: URL? = nil) throws -> EKReminder {
@@ -575,6 +622,10 @@ final class Bridge {
     func remove(_ item: EKCalendarItem?) throws {
         if item is EKReminder { try store.remove(try reminder(item), commit: false) }
         else { try store.remove(try event(item), span: .thisEvent, commit: false) }
+    }
+    func complete(_ item: EKCalendarItem?) throws {
+        guard let item = item as? EKReminder else { throw BridgeError(message: "Completion requires reminder") }
+        try stageCompletion(item) { try self.store.save($0, commit: false) }
     }
     func toEvent(_ change: [String: Any], _ source: EKCalendarItem?) throws {
         let source = try reminder(source)
@@ -661,6 +712,9 @@ final class Bridge {
               let expected = request["expected"] as? [String: [String: Any]] else {
             throw BridgeError(message: "Invalid apply request")
         }
+        guard validCompletionOriginals(changes, expected) else {
+            return ["status": "skipped", "reason": "完成操作仅支持原值未完成的提醒事项"]
+        }
         let ids = Set(changes.flatMap { [$0["item"], $0["into"]].compactMap { $0 as? String } })
         var resolved: [String: EKCalendarItem] = [:]
         for id in ids {
@@ -693,6 +747,7 @@ final class Bridge {
         let target = (change["into"] as? String).flatMap { resolved[$0] }
         let operations: [String: () throws -> Void] = [
             "update": { try self.update(change, item) }, "delete": { try self.remove(item) },
+            "complete": { try self.complete(item) },
             "to_event": { try self.toEvent(change, item) }, "merge": { try self.merge(change, item, target) },
             "update_event": { try self.updateEvent(change, item) },
             "create_reminder": { _ = try self.addReminder(change) }
@@ -703,11 +758,16 @@ final class Bridge {
     // One read pass supplies both presentation data and immutable generation originals.
     // This method is for an operator-configured cron pre-run collector, never HTTP mutation.
     func collect(_ request: [String: Any]) throws -> [String: Any] {
+        let allEvents = request["calendars"] as? String == "all"
+        let logicalCalendars = allEvents ? [] : request["calendars"] as? [String]
         guard let logicalLists = request["lists"] as? [String], !logicalLists.isEmpty,
               Set(logicalLists).count == logicalLists.count, Set(logicalLists).isSubset(of: Set(names.lists.keys)),
-              let logicalCalendars = request["calendars"] as? [String],
+              let logicalCalendars,
               Set(logicalCalendars).count == logicalCalendars.count,
-              Set(logicalCalendars).isSubset(of: Set(names.calendars.keys)) else {
+              Set(logicalCalendars).isSubset(of: Set(names.calendars.keys)),
+              let completedToday = request["include_completed_today"] as? Bool,
+              let planItems = request["plan_item_ids"] as? [String], planItems.count <= 24,
+              planItems.allSatisfy({ !$0.isEmpty }), Set(planItems).count == planItems.count else {
             throw BridgeError(message: "Invalid collection scope")
         }
         let lists = logicalLists.map { names.actual($0, .reminder) }
@@ -716,13 +776,15 @@ final class Bridge {
         guard end > start, end.timeIntervalSince(start) <= 31 * 86400 else {
             throw BridgeError(message: "Invalid collection window")
         }
-        let calendars = store.calendars(for: .reminder).filter { lists.contains($0.title) }
+        let availableLists = store.calendars(for: .reminder)
+        let calendars = availableLists.filter { lists.contains($0.title) }
         guard Set(calendars.map { $0.title }) == Set(lists), calendars.count == Set(lists).count else {
             throw BridgeError(message: "Missing or ambiguous reminder lists")
         }
         var reminders: [EKReminder]?
         let done = DispatchSemaphore(value: 0)
-        let token = store.fetchReminders(matching: store.predicateForReminders(in: calendars)) { values in
+        let planIDs = Set(planItems)
+        let token = store.fetchReminders(matching: store.predicateForReminders(in: completedToday || !planIDs.isEmpty ? nil : calendars)) { values in
             reminders = values; done.signal()
         }
         guard done.wait(timeout: .now() + 5) == .success, let reminders = reminders else {
@@ -730,23 +792,30 @@ final class Bridge {
             throw BridgeError(message: "Reminder read unavailable")
         }
         var events: [EKEvent] = []
-        if !eventTitles.isEmpty {
-            let eventCalendars = store.calendars(for: .event).filter { eventTitles.contains($0.title) }
-            guard Set(eventCalendars.map { $0.title }) == Set(eventTitles), eventCalendars.count == Set(eventTitles).count else {
-                throw BridgeError(message: "Missing or ambiguous event calendars")
-            }
+        if allEvents || !eventTitles.isEmpty {
+            guard permitted(.event) else { throw BridgeError(message: "Permission unavailable") }
+            let available = store.calendars(for: .event)
+            let ids = try eventReadIDs(available.map { ($0.calendarIdentifier, $0.title, $0.allowsContentModifications) },
+                                      destinations: Set(names.calendars.values), all: allEvents, selected: Set(eventTitles))
+            let eventCalendars = available.filter { ids.contains($0.calendarIdentifier) }
             events = store.events(matching: store.predicateForEvents(withStart: start, end: end, calendars: eventCalendars))
         }
-        guard permitted(.reminder), eventTitles.isEmpty || permitted(.event) else {
+        guard permitted(.reminder), (!allEvents && eventTitles.isEmpty) || permitted(.event),
+              Set(availableLists.map { $0.calendarIdentifier }) == Set(store.calendars(for: .reminder).map { $0.calendarIdentifier }) else {
             throw BridgeError(message: "Permission unavailable")
         }
-        let items: [EKCalendarItem] = reminders + events
+        let selected = reminders.filter {
+            includeReminder(id: stableID($0), list: $0.calendar.title, completed: $0.isCompleted,
+                            completedAt: $0.completionDate, lists: Set(lists), planIDs: planIDs,
+                            completedToday: completedToday, start: start, end: end)
+        }
+        let items: [EKCalendarItem] = selected + events
         let rows = items.map { item in
             var row = snapshot(stableID(item), item)
             row["created_at"] = item.creationDate.map { fractional.string(from: $0) } ?? null as Any
             return row
         }
-        return try collectionDocument(rows, at: Date())
+        return try collectionDocument(rows, at: Date(), includeCompleted: true, planIDs: planIDs)
     }
 
     func handle(_ request: [String: Any]) throws -> [String: Any] {
@@ -978,6 +1047,62 @@ func testMovedMergeTarget() throws {
     precondition(committed == ["merged into new", "due on new"] && runner.calls.count == 1)
 }
 
+final class CompletionFixture: CompletionTarget {
+    var isCompleted = false, hasRecurrenceRules = false
+    var title = "before"
+}
+func testCompletion() throws {
+    let changes: [[String: Any]] = [["op": "update", "item": "reminder", "title": "after", "by": "user"],
+                                   ["op": "complete", "item": "reminder", "by": "user"]]
+    precondition(validCompletionOriginals(changes, ["reminder": ["source": "reminder", "completed": false]]))
+    for invalid: [String: Any] in [[:], ["source": "event", "completed": false],
+                                    ["source": "reminder", "completed": true], ["source": "reminder"]] {
+        precondition(!validCompletionOriginals(changes, ["reminder": invalid]))
+    }
+    precondition(!validCompletionOriginals(changes, [:]))
+    for failure in ["none", "prepare", "commit"] {
+        let item = CompletionFixture(), runner = MoveTestRunner()
+        var saves = 0, commits = 0, resets = 0, stored = false
+        do {
+            _ = try applyWithMoves([], runner: runner, context: MutationContext(changes),
+                observe: { _, _ in preconditionFailure("Completion must not move") },
+                prepare: { _ in
+                    try stageGroup(changes, resolved: ["reminder": item]) { change, resolved in
+                        let target = resolved["reminder"]!
+                        if change["op"] as? String == "update" { target.title = "after"; saves += 1 }
+                        else {
+                            try stageCompletion(target) { value in
+                                precondition(value.isCompleted && value.title == "after" && commits == 0)
+                                saves += 1
+                            }
+                        }
+                    }
+                    if failure == "prepare" { throw BridgeError(message: "synthetic staging failure") }
+                }, commit: {
+                    commits += 1
+                    if failure == "commit" { throw BridgeError(message: "synthetic commit failure") }
+                    stored = item.isCompleted
+                }, reset: { resets += 1; item.isCompleted = false; item.title = "before" })
+            precondition(failure == "none" && stored && commits == 1 && resets == 0)
+        } catch let error as MutationFailure {
+            precondition(failure != "none" && !stored && !item.isCompleted && item.title == "before")
+            precondition(error.outcome == (failure == "prepare" ? "not_executed" : "unknown"))
+            precondition(commits == (failure == "prepare" ? 0 : 1) && resets == 1)
+        }
+        precondition(saves == 2 && runner.calls.isEmpty)
+    }
+    for completed in [true, false] {
+        let item = CompletionFixture()
+        item.isCompleted = completed; item.hasRecurrenceRules = !completed
+        do {
+            try stageCompletion(item) { _ in preconditionFailure("Unsupported completion saved") }
+            preconditionFailure("Unsupported completion accepted")
+        } catch is BridgeError {}
+    }
+    let context = MutationContext([["op": "complete", "item": "PRIVATE_ID", "by": "user"]])
+    precondition(context.op == "complete" && context.fields.isEmpty)
+}
+
 func testFailureDiagnostics() throws {
     let privateValues = ["PRIVATE_TITLE", "PRIVATE_NOTES", "PRIVATE_LIST", "PRIVATE_ID"]
     let privateText = privateValues.joined(separator: " ")
@@ -1124,11 +1249,49 @@ func testAppleMappingAndCollection() throws {
     catch is BridgeError {}
 }
 
+func testCollectionV2() throws {
+    let start = try parseDate("2026-10-16T00:00:00+08:00"), end = start.addingTimeInterval(86400)
+    let calendars = [("work", "工作", true), ("life", "生活", true), ("family", "家庭", true),
+                     ("holiday", "节假日", false), ("shared", "团队", false), ("other", "其他", true)]
+    let ids = try eventReadIDs(calendars, destinations: ["工作", "生活", "家庭"], all: true, selected: [])
+    precondition(ids == Set(calendars.map { $0.0 }))
+    do {
+        _ = try eventReadIDs(calendars + [("duplicate", "工作", false)],
+                            destinations: ["工作", "生活", "家庭"], all: true, selected: [])
+        preconditionFailure("Ambiguous write calendar accepted")
+    } catch is BridgeError {}
+    func includes(_ id: String, _ list: String, _ done: Bool, _ date: Date?) -> Bool {
+        includeReminder(id: id, list: list, completed: done, completedAt: date,
+                        lists: ["收件箱"], planIDs: ["planned"], completedToday: true, start: start, end: end)
+    }
+    precondition(includes("inbox", "收件箱", false, nil))
+    precondition(includes("planned", "其他清单", true, start.addingTimeInterval(-86400)))
+    precondition(includes("done", "其他清单", true, start))
+    precondition(!includes("tomorrow", "其他清单", true, end))
+    precondition(!includes("old", "其他清单", true, start.addingTimeInterval(-1)))
+    precondition(!includes("unrelated", "其他清单", false, nil))
+    let completed: [String: Any] = ["id": "done", "source": "reminder", "exists": true, "completed": true,
+        "title": "合成完成项", "list": "其他清单", "due": null, "modified_at": iso.string(from: start)]
+    let event: [String: Any] = ["id": "event", "source": "event", "exists": true, "completed": false,
+        "title": "合成节日", "list": "节假日", "calendar": "节假日", "location": "", "all_day": true,
+        "subscribed": true, "start": iso.string(from: start), "end": iso.string(from: end),
+        "due": null, "modified_at": iso.string(from: start)]
+    let doc = try collectionDocument([completed, event], at: start, includeCompleted: true, planIDs: ["done", "missing"])
+    let rows = doc["items"] as! [[String: Any]], originals = doc["originals"] as! [String: [String: Any]]
+    precondition(rows.count == 2 && originals["done"]?["completed"] as? Bool == true)
+    precondition(rows[1]["calendar"] as? String == "节假日" && rows[1]["all_day"] as? Bool == true)
+    precondition(originals["event"]?["start"] as? String == iso.string(from: start))
+    precondition(originals["event"]?["location"] == nil)
+    precondition(doc["missing_plan_item_ids"] as? [String] == ["missing"])
+}
+
 // This branch is safe for development: it creates no EKEventStore and calls no permission APIs.
 if CommandLine.arguments.contains("--self-test") {
     do {
+        try testCollectionV2()
         try testReminderMoves()
         try testFailureDiagnostics()
+        try testCompletion()
         try testReadOnlyInspection()
         try testMinutePrecisionDates()
         try testAppleMappingAndCollection()

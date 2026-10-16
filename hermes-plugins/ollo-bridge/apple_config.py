@@ -1,8 +1,19 @@
 """Non-secret Apple names and collection scopes, shared with standalone cron."""
 from unicodedata import normalize
+from pathlib import Path
 
 LISTS = ('收件箱', '工作', '生活', '家庭', '等待', '长期')
 CALENDARS = ('工作', '生活', '家庭')
+
+
+def knowledge(value=None):
+    value = {} if value is None else value
+    if not isinstance(value, dict) or value.keys() - {'places'}:
+        raise ValueError('invalid_knowledge_config')
+    path = value.get('places')
+    if path is not None and (not isinstance(path, str) or not Path(path).is_absolute()):
+        raise ValueError('invalid_places_path')
+    return {'places': path}
 
 
 def names(value=None):
@@ -37,9 +48,16 @@ def scopes(value=None):
         for key, allowed in (('lists', LISTS), ('calendars', CALENDARS)):
             default = (['收件箱'] if key == 'lists' else []) if kind == 'inbox' else list(allowed)
             selected = entry.get(key, default)
+            if key == 'calendars' and selected == 'all':
+                scope[key] = 'all'
+                continue
             if (not isinstance(selected, list) or any(not isinstance(v, str) or v not in allowed for v in selected)
                     or len(set(selected)) != len(selected) or (key == 'lists' and not selected)):
                 raise ValueError('invalid_collection_scope')
             scope[key] = list(selected)
+        # Older installations explicitly stored the three destination names.
+        # They remain write destinations; v2 event reads are never narrowed by them.
+        if kind in {'agenda', 'review'}:
+            scope['calendars'] = 'all'
         result[kind] = scope
     return result
