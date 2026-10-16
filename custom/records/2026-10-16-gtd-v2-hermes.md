@@ -115,3 +115,26 @@ bash -c 'export HERMES_RUNTIME_DIR=$HOME/.cache/hermes-agent-dev/tools HERMES_HO
 ## 部署与回滚
 
 本次不执行。设计会话先完成沙箱外测试及 G1–G3 合成联调，然后用户另行同意：部署插件/helper/脚本/两个技能/四任务prompt；知识库单篇笔记与knowledge.places；Gateway重启和真实Apple验收。安装步骤、备份范围、版本配套和回滚详见[G4安装说明](../../hermes-plugins/ollo-bridge/docs/gtd-v2-install.md)。回滚整套恢复备份，不删除报告/计划/幂等回执，不自动撤销真实Apple写入，不重试unknown。
+
+## 执行记录（2026-10-16 23:13–23:19，设计会话，用户同意「同意部署」）
+
+先部署 Ollo 网关，再部署 Hermes 侧，网关记录见 Ollo 仓库 `server/qa/gtd-v2-deploy-2026-10-16.md`。
+
+- **来源**：fork `custom` = `d92bd300a0`，`hermes-plugins/` 与 `cadf13c348` 相同。
+- **备份**：`~/.hermes/backups/gtd-v2-20261016-231457/`，含旧插件、旧 helper、四个采集脚本、两个 SKILL.md、bridge.json、完整 jobs.json。
+- **插件**：rsync 时排除 `__pycache__`、`.pytest_cache`、`contracts/export*`，之后 `diff -rq` 一致。
+- **helper**：`swiftc -O -assert-config Debug` 加 Info.plist 编译，在 `~/.cache/hermes-agent-dev/gtd-v2-deploy/` 构建，ad-hoc 签名，标识仍为 `com.birderyu.ollo.bridge.eventkit`。strict 验证与 `--self-test` 都通过（`{"ok":true}`），替换后 `cmp` 一致。
+- **采集脚本**：四个 `ollo_collect*.py` 作为普通文件复制，逐个 `cmp` 一致。
+- **技能**：`gtd`、`hermes-plus-gtd` 的 SKILL.md 由 v2 候选安装，只去掉「候选/未安装」句和末尾的安装链接。
+- **四个任务**：用 `cron.jobs.update_job` 只改 `prompt`，取自 `cron-prompts-v2-candidate.md` 的四个 text 围栏。name、schedule、next_run_at、script、deliver、skills、enabled_toolsets 逐项核对未变。
+- **配置**：bridge.json 未改，没有加 `knowledge.places`（地点笔记待用户提供），所以 place 恒为 null。
+- **重启一次**：23:15:58 执行 `hermes gateway restart`，旧进程 0.32 秒退净。23:16:05–06 ollo-bridge handlers 接上，ollo、api_server 重新连接。launchd program 仍为 `/usr/bin/osascript`。errors.log 只有原有的 SSH 密码登录审计警告。
+- **采集验收**：用一次性 no_agent 任务在网关进程里跑采集，只输出结构和数量，23:17:08 运行。任务与临时脚本 `ollo_v2_shape_check.py` 已删。结果：
+  - agenda：当天已生成，输出 `wakeAgent:false`。
+  - inbox：4 条提醒，其中 2 条为当天完成；计划 404 视为没有计划。
+  - review：34 条提醒、2 个事件，来自 1 个订阅日历。
+  - workday 按星期回退为 true；reports 2 份。
+  - location 为 null：网关的自动设备点只保留 120 秒，这时最近一次上报是 21:30。
+- **对话链路**：`install.py verify --send` 经公网发出，23:18:21 run.completed。运行中 pre_llm_call 读取了日账、位置、计划、报告；语气分类与回复推送正常。脚本最后一步公网读历史的请求没到网关（网络抖动），回复已入库。
+- **待验收（d）**：周六 09:30 周末今日安排是第一份 v2 报告；周日 21:00 每周回顾；周一 21:00 起才有工作日收尾卡。真实写入确认用用户同意的事项。
+- **已知限制**：定时采集基本拿不到位置（网关保留 120 秒）。是改为采集时主动请求一次定位，还是延长保留，需用户决定。
