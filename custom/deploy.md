@@ -118,7 +118,7 @@ diff -rq -x __pycache__ ~/.hermes/hermes-agent/hermes-plugins/ollo-inbox ~/.herm
 | 平台 | `gateway_state.json`（看各平台的写入者 PID 是否为当前进程）、网关日志的 `photon connected` | Photon、API server、`ollo` connected。sidecar 的 `/healthz`、`/probe` 需要认证，`/probe` 返回 inconclusive 也不能算健康证明 |
 | 插件 | `hermes plugins list`、网关日志 | `ollo-*` 已加载，无报错 |
 | 定时任务 | `hermes cron list` | 全部 enabled，下次运行时间正常 |
-| Ollo | Ollo 仓库 `server/deploy/install.py verify`（本机、公网）；必要时加 `--send "…"` 发一条验收消息 | 能力、会话、历史正常；发送时事件到 `run.completed`，回复出现在历史 |
+| Ollo | Ollo 仓库 `server/deploy/install.py verify`（本机、公网）。**Hermes 版本升级后必须加 `--send "…"` 真发一条**，只读的 verify 测不到写入路径（2026-10-15 升级后 `/v1/runs` 全部 409，只读核对没发现，见下） | 能力、会话、历史正常；发送时事件到 `run.completed`，回复出现在历史 |
 | 日志 | 重启后的 `~/.hermes/logs/gateway.log`、`gateway.error.log`、`errors.log`（按行首时间戳筛选） | 没有新的 ERROR、Traceback |
 | 日历与提醒事项 | 下一次 GTD 定时任务的输出，或日志里的 `full access is not granted` | 能读到。读不到时，在 Mac mini 上给 `osascript` 授权（v0.21.6 起网关由它启动）：解锁屏幕后在 Ollo App 里发「今日安排」，弹窗里允许提醒事项、日历选「完全访问」；没有弹窗就到「系统设置 → 隐私与安全性 → 提醒事项 / 日历」打开 `osascript`，列表里没有它时先在终端 `tccutil reset Reminders com.apple.osascript`、`tccutil reset Calendar com.apple.osascript` 再触发一次。授权给 `osascript` 意味着用它运行的其他脚本也能读日历和提醒事项 |
 
@@ -130,6 +130,8 @@ diff -rq -x __pycache__ ~/.hermes/hermes-agent/hermes-plugins/ollo-inbox ~/.herm
 - 每跑一次都会按任务的投递设置发一条真实报告。
 
 验证只能走网关：在 Ollo App 里发消息触发，或者等任务按时运行。看任务是不是调度器触发的，查 `cron/jobs.json` 里的 `last_dispatch`，或者看日志里那次运行所在的线程：网关调度的是 `cron-parallel_*`，直接运行的是 `MainThread`。
+
+升级到会话权威（v0.22.x）以后，API 会话的 `sessions.session_key` 必须为空或等于新的路由键。v0.21 会把客户端声明的 `X-Hermes-Session-Key`（Ollo 是 `hermesplus:main`）写进这一列，官方没有迁移，旧会话一绑定就 `admission_conflict`，`POST /v1/runs` 返回 409。处理：在线备份 `state.db` 后，把这条会话的 `session_key` 置空（`UPDATE sessions SET session_key=NULL WHERE id=<会话> AND session_key=<旧键>`），不用重启；下一次请求会重新绑定成路由键。详见 [v0.22.1 升级记录](records/2026-10-15-v0.22.1.md)。
 
 `hermes photon status` 会打印手机号和 Photon 项目标识，只看「已存储/已安装」这类状态，不要把输出贴进记录。
 
