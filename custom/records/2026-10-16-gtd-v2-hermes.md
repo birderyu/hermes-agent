@@ -138,3 +138,14 @@ bash -c 'export HERMES_RUNTIME_DIR=$HOME/.cache/hermes-agent-dev/tools HERMES_HO
 - **对话链路**：`install.py verify --send` 经公网发出，23:18:21 run.completed。运行中 pre_llm_call 读取了日账、位置、计划、报告；语气分类与回复推送正常。脚本最后一步公网读历史的请求没到网关（网络抖动），回复已入库。
 - **待验收（d）**：周六 09:30 周末今日安排是第一份 v2 报告；周日 21:00 每周回顾；周一 21:00 起才有工作日收尾卡。真实写入确认用用户同意的事项。
 - **已知限制**：定时采集基本拿不到位置（网关保留 120 秒）。是改为采集时主动请求一次定位，还是延长保留，需用户决定。
+
+## 验收修正：计划卡的说法（2026-10-17，用户同意）
+
+第一份 v2 周末今日安排（10-17 09:30）在用户手机上：卡里多了一段 text，写着日期星期、「按星期推断为休息日」「本次采集未列出日历事件」、到期/超期统计和排法理由；task 行同时带 end、时长胶囊和 note「预计 15 分钟」，三处说同一件事，挤得时长胶囊换行。
+
+修改 `docs/gtd-skill-v2-candidate.md`：
+- 「说话」：时长胶囊本身就是预计，不另写；推断过程、采集说明、统计、排法理由不进回复和卡片。
+- 「排一天」：plan 卡只放 plan 和按钮，不放 text；task 行写 time + duration_minutes，不写 end；event 写 time + end（+ place）；note 只写改动来源或行里没有的必要事实。
+- 五个示例的 task 行去掉 end。
+
+`hermes-plugins/` 测试 595 项通过。10:13 安装到 `~/.hermes/skills/gtd/SKILL.md`（同样去掉候选维护句），备份在 `~/.hermes/backups/gtd-skill-wording-20261017-101317/`；技能按运行时加载，不需要重启。App 侧另改：时长胶囊不换行，task 行不显示 end（Ollo 仓库下一个测试版）。
