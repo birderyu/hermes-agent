@@ -149,3 +149,9 @@ bash -c 'export HERMES_RUNTIME_DIR=$HOME/.cache/hermes-agent-dev/tools HERMES_HO
 - 五个示例的 task 行去掉 end。
 
 `hermes-plugins/` 测试 595 项通过。10:13 安装到 `~/.hermes/skills/gtd/SKILL.md`（同样去掉候选维护句），备份在 `~/.hermes/backups/gtd-skill-wording-20261017-101317/`；技能按运行时加载，不需要重启。App 侧另改：时长胶囊不换行，task 行不显示 end（Ollo 仓库下一个测试版）。
+
+## 验收修正：findings 写成文字（2026-10-19，用户同意）
+
+10-17 起 5 份 v2 报告里 4 份（10-17 09:30 agenda、10-18 09:30 agenda、10-18 21:01 review、10-19 21:00 inbox）把 `findings` 写成字符串（如「已完成」），不符合合同的四种对象，网关 schema 校验失败、`gtd` 存为 null，带写入的卡片随之作废（10-18 09:30 `cards.rejected category=invalid_group`）。10-19 08:00 那份 `findings` 为空，正常。用线上网关代码重放 10-19 21:00 报告：原样拒收，把 `findings` 改为 `[]` 即通过。
+
+修改 `docs/hermes-plus-gtd-v2-candidate.md`「输入与输出」：写明 findings 只有 duplicate/conflict/expired/missing 四种对象及字段，没有就 `[]`，状态说明不写进 findings、不写字符串。只改 Skill 说明，不改代码与合同。同步到 Ollo 仓库 `hermes/skills/hermes-plus-gtd/SKILL.md` 并安装到 `~/.hermes/skills/hermes-plus-gtd/SKILL.md`。
