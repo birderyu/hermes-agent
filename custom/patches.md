@@ -8,20 +8,25 @@
 
 | 提交 | 内容 | 为什么还需要 | 上游状态 | 什么时候可以移除 |
 | --- | --- | --- | --- | --- |
-| `1abf25911b` fix(cron): pass execution_id to live-adapter delivery metadata | 定时任务走 live adapter 投递时，把执行 ID 放进路由元数据（v0.22.1 起在 `cron/scheduler_delivery.py` 的 `_live_route_metadata` 普通分支） | ollo-bridge 据此查宿主执行账本，并让 Ollo 网关按执行 ID 幂等 | v0.22.1 仍没有：execution_id 只用于 Bot Chat 身份和外部 worker 判断（一行，适合提 PR） | 上游等价透传，或 ollo-bridge 下线 |
-| `71cfa6f80a` fix(cron): idempotent live delivery retry for single-target adapters | 声明 `idempotent_delivery=True` 的 live adapter 投递失败、发送进程死亡或超时后，按同一执行有界重放 | Ollo 的报告投递靠它做到「至少一次且不重复」 | v0.22.1 只部分覆盖，见下 | 见下 |
-| `402c399d50` `33ef9241fb` `c2f90a1bb8` `cb739533b7` `ca29601010` | `hermes-plugins/` 目录与忽略规则；`ollo-inbox`、`ollo-location`、`ollo-conversation` 及其文档、测试 | Ollo 服务端插件源码在本 fork 维护 | 个人插件，不提交上游 | 插件全部下线 |
-| `384c80420a` `cd3873d8ad` `321f745aab` `b00f191658` `ede9e955c6` | `ollo-bridge`（报告投递与读取、位置、身份、日程 handler、受限确认、GTD 正式切换工具、EventKit 诊断）与 `ollo-conversation` 语气开关 | 运行环境唯一在用的 Ollo 插件 | 同上 | 同上 |
-| `9dd4cb0b4d` `16f38f8393` `1ab6119a2a` `40ec1a5ff4` `a76cf21de0` `8663d9e22e` `2855a1fafc` `603a2c4b15` `2043ff7e70` `929779e08b` `d0ca63343c` `d9a892d1f6` 及本表所在提交 | `custom/` 维护文档与修订记录（2026-10-11 由 `fork/` 改名） | 本 fork 的修订方式与记录 | — | — |
+| `1abf25911b` fix(cron): pass execution_id to live-adapter delivery metadata | 定时任务走 live adapter 投递时，把执行 ID 放进路由元数据（`cron/scheduler_delivery.py` 的 `_live_route_metadata` 普通分支） | Ollo 仓库 `hermes/ollo-bridge/reports.py` 的 `delivery()` 从元数据取执行 ID，`execution.py` 的 `report_identity()` 据此查宿主执行账本；Ollo 网关按它幂等 | v0.22.1 仍没有：execution_id 只用于 Bot Chat 身份和外部 worker 判断（一行，适合提 PR） | 上游等价透传，或 ollo-bridge 下线 |
+| `71cfa6f80a` fix(cron): idempotent live delivery retry for single-target adapters | 声明 `idempotent_delivery=True` 的 live adapter 投递失败、发送进程死亡或超时后，按同一执行有界重放 | Ollo 仓库 `hermes/ollo-bridge/__init__.py` 的 `BridgeAdapter` 声明可重试，`execution.py` 读投递队列快照；Ollo 报告「至少一次且不重复」靠它 | v0.22.1 只部分覆盖，见下 | 见下 |
+| `9dd4cb0b4d` `16f38f8393` `1ab6119a2a` 等 17 个 `docs(fork)`、`docs(custom)` 提交，及本表所在提交 | `custom/` 维护文档与修订记录（2026-10-11 由 `fork/` 改名） | 本 fork 的修订方式与记录 | — | — |
+| 16 个 Ollo 插件相关提交 | 见下「已移出的 Ollo 插件提交」 | 2026-10-20 已移到 Ollo 仓库 | — | 下次发行版变基时处理 |
 
-### Ollo 插件的去留
+两个 cron 补丁依赖的宿主符号清单在 Ollo 仓库 `hermes/scripts/check_host.py`，兼容的 fork 提交记在 `hermes/compat.toml`。发行版升级时要在升级副本上跑 Ollo 仓库的检查脚本，见 [维护方式](maintenance.md#发行版升级)。
 
-| 插件 | 现状 | 计划 |
+### 已移出的 Ollo 插件提交
+
+Ollo 的服务端代码（ollo-bridge、日历助手 ollo-eventkit、采集脚本、GTD 技能和任务提示词）2026-10-20 起在 Ollo 仓库的 `hermes/` 维护：迁移提交 `405ed17506`，与线上逐字节核对见 Ollo 仓库 `hermes/qa/`。本 fork 用 `bcc45f9101` 删除了 `hermes-plugins/` 和根 `.gitignore` 的插件规则，`.gitignore` 恢复为官方原样。经过见 [迁移记录](records/2026-10-20-ollo-code-to-ollo-repo.md)。
+
+`main..custom` 里还留着这些提交，下次发行版变基时处理：
+
+| 提交 | 改动 | 处理 |
 | --- | --- | --- |
-| `ollo-bridge` | 运行环境唯一在用的 Ollo 插件；2026-10-14 起 4 个 GTD 任务投递 `ollo:main` | 随 Ollo 网关计划演进 |
-| `ollo-conversation`、`ollo-inbox`、`ollo-location` | 10-11 起在运行环境停用，10-15 运行环境副本移入备份；仓库源码仍在 | 确认不再需要回滚后从仓库删除，由 Ollo 设计会话决定 |
+| `402c399d50` `33ef9241fb` `c2f90a1bb8` `ca29601010` `384c80420a` `cd3873d8ad` `321f745aab`、`cb739533b7`、`bcc45f9101` | 只改 `hermes-plugins/` 和 `.gitignore` | 丢掉：与删除提交合起来净效果为零 |
+| `b00f191658` `ede9e955c6` `b91c8e5a9c` `fc48a8fa16` `cadf13c348` `66a24c14de` `69ddd1d910` | 改 `hermes-plugins/`，同时新增或修改 `custom/records/` 的记录 | 保留记录部分，去掉插件部分 |
 
-各插件的设计、对账与部署经过见 [记录](records/README.md)（`2026-10-11-ollo-*`、`2026-10-14-ollo-gtd-production-switch`、`2026-10-15-*`）和 [ollo-bridge README](../hermes-plugins/ollo-bridge/README.md)。
+做法：变基时先照常全部重放（上游不碰这两个目录，不会冲突），变基后执行 `git filter-branch --index-filter 'git rm -r -q --cached --ignore-unmatch hermes-plugins' --prune-empty -- main..custom`，把插件改动从这些提交里剥掉；变空的提交会被自动去掉，剩下只改 `.gitignore` 的那几个一起 drop。验收：`git diff main custom -- hermes-plugins .gitignore` 为空，`custom/records/` 一篇不少，range-diff 写进升级记录。
 
 ### 投递重试补丁（`71cfa6f80a`）
 
@@ -37,7 +42,7 @@
 
 **什么时候可以移除：** 上游提供等价的幂等 adapter 声明、进程内持久入队、失败/死进程重放、超时不假成功能力时，重接插件后整体移除；或所有声明此能力的消费者下线。移除/回滚前先处理原队列里的 pending/in-flight 行，不能静默丢弃或无条件重放。
 
-**行为测试：** `tests/cron/test_delivery_retry.py` 覆盖相同载荷重放、退避上限、死进程恢复、非认证失败/unknown、任务伪造开关、fan-out/附件/relay 排除、发送超时与 standalone 差异。`hermes-plugins/ollo-bridge/test_cron.py` 以真实宿主 router/queue 和网关 HTTP 替身验证进程内失败后重试。原 `tests/cron/test_delivery_queue.py`、`test_cron_relay_dm_origin_user_id.py` 保持原样，供非 opt-in 回归。v0.22.1 上 `tests/cron/` 与 `hermes-plugins/` 全部通过。
+**行为测试：** 本 fork 的 `tests/cron/test_delivery_retry.py` 覆盖相同载荷重放、退避上限、死进程恢复、非认证失败/unknown、任务伪造开关、fan-out/附件/relay 排除、发送超时与 standalone 差异；原 `tests/cron/test_delivery_queue.py`、`test_cron_relay_dm_origin_user_id.py` 保持原样，供非 opt-in 回归。端到端依赖由 Ollo 仓库的 `hermes/tests/test_cron.py::test_inprocess_cron_http_failure_enters_host_queue_and_retries_same_execution` 证明：它走真实的 `_deliver_result`、平台注册和投递队列，去掉「失败回到 pending」时按预期失败；同一用例也覆盖 execution_id 透传。
 
 ## 运行环境里的非代码调整
 
@@ -66,6 +71,7 @@ v0.21.6 起 `sessions.auto_prune` 默认开启，网关会删除已结束且 90 
 
 | 原提交（最后的 SHA） | 内容 | 移除日期 | 原因 |
 | --- | --- | --- | --- |
+| `hermes-plugins/`（16 个提交，删除提交 `bcc45f9101`） | Ollo 服务端插件：`ollo-bridge` 及已停用的 `ollo-conversation`、`ollo-inbox`、`ollo-location` | 2026-10-20 | 移到 Ollo 仓库的 `hermes/`，fork 只放 Hermes 本体补丁；提交的处理见上「已移出的 Ollo 插件提交」 |
 | `b0958faafa` fix(photon): accept empty iMessage poll titles；`2f360fa07c` fix(photon): scope native poll lifecycle to clarify；`db496d81b7` fix(photon): align voice attachment filename with m4a | 空投票标题的 Spectrum 补丁；`clarify` 原生投票的生命周期与多选；语音附件 `.m4a` 文件名 | 2026-10-11 | 不再使用 iMessage，三个补丁都满足退出条件。先在 `custom` 上由撤回提交 `e596821fad` 抵消，2026-10-15 升级到 v0.22.1 的变基中原提交与撤回提交一起丢掉。同日运行环境关闭了 Photon。重写后的投票生命周期始终没有真机验证 |
 | （运行环境）语言覆盖 `custom/runtime/locales/zh.yaml`、`en.yaml` | 改写 `gateway.session.auto_reset_notice` 的文案 | 2026-10-11 | 不装会话自动重置插件，这条提示不会再出现。仓库里的文件删除，运行环境的副本移到 `~/.hermes/backups/cleanup-20261011/locales/` |
 | `866b894af1` fix(i18n): localize gateway session reset notices | 重置提示与会话信息块本地化 | 2026-10-11 | 上游已本地化（`gateway.session.*`）；剩下的措辞问题改用运行时语言覆盖。原补丁改 `run_turn.py` 和 17 个语言文件，每次升级都冲突 |

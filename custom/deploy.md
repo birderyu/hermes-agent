@@ -12,7 +12,7 @@
 | 命令入口 | `~/.local/bin/hermes` → `~/.hermes/hermes-agent/.hermes/bin/hermes`（都由更新流程生成） |
 | 常驻服务 | `~/Library/LaunchAgents/ai.hermes.gateway.plist`，经 `/usr/bin/osascript` 启动网关（`hermes gateway restart` 发现定义过时会重写） |
 | 运行数据与配置 | `~/.hermes`（`config.yaml`、`.env`、`state.db`、`cron/`、`plugins/`、`skills/` 等），不在本仓库 |
-| Ollo 插件 | `~/.hermes/plugins/ollo-*`，从 `hermes-plugins/` 复制安装 |
+| Ollo 服务端代码 | `~/.hermes/plugins/ollo-bridge`、`~/.hermes/ollo/`（日历助手与配置）、`~/.hermes/scripts/ollo_collect*.py`、GTD 技能与 4 个任务的提示词。2026-10-20 起源码在 Ollo 仓库的 `hermes/`，不随 `hermes update` 部署 |
 
 v0.21.5 及以前，依赖装在 `~/.hermes/hermes-agent/venv`，LaunchAgent 直接运行其中的 Python；第一次升级到 pm 管理的版本时，更新流程建立新环境、重新生成入口和服务，旧 `venv` 不再使用（2026-10-11 的升级前副本在 `~/.hermes/backups/pre-v0.21.6-20261011/venv`）。
 
@@ -99,13 +99,7 @@ hermes gateway restart
 
 只改 `custom/` 文档的提交不需要部署，运行目录的 HEAD 可以落后 `origin/custom` 若干个纯文档提交。
 
-插件代码有变化时，先比较再复制：
-
-```bash
-diff -rq -x __pycache__ ~/.hermes/hermes-agent/hermes-plugins/ollo-inbox ~/.hermes/plugins/ollo-inbox
-```
-
-只有插件改了才替换已安装副本，替换前把旧副本留在备份目录；插件的数据库在 `~/.hermes/plugin-data/`，不随插件目录替换。替换后 `hermes gateway restart`。
+Ollo 的服务端代码不在本仓库，也不随 `hermes update` 部署：在 Ollo 仓库按 `hermes/deploy/README.md` 用 `python3 hermes/deploy/manage.py {verify|backup|sync|rollback}` 部署插件（白名单同步，测试和文档不进 `~/.hermes`），日历助手、采集脚本、技能和任务提示词各有安装步骤。插件的数据库在 `~/.hermes/plugin-data/`，不随插件替换。插件改了要 `hermes gateway restart`，重启后核对 LaunchAgent 仍经 `osascript` 启动。
 
 ### 4 验证
 

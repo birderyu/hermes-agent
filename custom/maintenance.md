@@ -57,7 +57,7 @@ source ./activate                                         # 进入开发环境�
 5. `git push origin custom`（普通快进推送）。部署另走 [部署](deploy.md)。
 6. 在 `records/` 写一篇记录，并更新 [记录索引](records/README.md)。
 
-`hermes-plugins/` 下的 Ollo 插件同样在 `custom` 上维护，说明见 [hermes-plugins/README.md](../hermes-plugins/README.md)。
+本 fork 只放 Hermes 本体补丁。Ollo 的服务端代码 2026-10-20 起在 Ollo 仓库的 `hermes/` 维护，它依赖本 fork 的两个 cron 补丁：依赖的宿主符号清单在 `hermes/scripts/check_host.py`，兼容的 fork 提交记在 `hermes/compat.toml`。
 
 ## 发行版升级
 
@@ -92,8 +92,17 @@ git range-diff "backup/main-pre-$TAG-$D..backup/custom-pre-$TAG-$D" main..custom
 - 变基冲突：先 `git rebase --abort`，保存冲突差异、读懂上游现在的代码，再重放；按补丁原意合并，不把上游新行为改回去。
 - 每个 `!` 的 range-diff 都要审阅并写进记录。
 - 上游已修好的补丁在这一步 drop，并在 [补丁清单](patches.md) 移到「已移除」。
+- 已移出的 Ollo 插件提交按 [补丁清单](patches.md#已移出的-ollo-插件提交) 处理（处理完一次，以后的变基就不再有这一项）。
 
-然后按「开发环境」重新 `setup-hermes.sh --runtime-only --test-environment`，跑测试（下一节）。全部通过后推送：
+然后按「开发环境」重新 `setup-hermes.sh --runtime-only --test-environment`，跑测试（下一节）。再在升级副本上跑 Ollo 仓库的检查（升级副本的提交号必然和 `compat.toml` 不同，所以用 `--candidate`，它改为逐项检查 ollo-bridge 依赖的宿主符号）：
+
+```bash
+cd ~/Projects/ollo
+bash hermes/scripts/check.sh --candidate --hermes-source <升级副本> --python <升级副本测试环境的 python>
+```
+
+两者都通过后推送；推送后在 Ollo 仓库把 `hermes/compat.toml` 的 `fork_commit` 改成推送后的 `custom`，用默认模式再跑一次 `check.sh`：
+
 
 ```bash
 git fetch origin
@@ -105,7 +114,7 @@ git push --atomic --force-with-lease=refs/heads/custom:$OLD_ORIGIN_CUSTOM origin
 
 ## 测试与基线对照
 
-1. **定向测试**：`hermes-plugins/`、`tests/cron/` 里与投递相关的文件、`tests/gateway/` 里与补丁相关的文件。
+1. **定向测试**：`tests/cron/` 里与投递相关的文件、`tests/gateway/` 里与补丁相关的文件；Ollo 仓库的 `hermes/scripts/check.sh --candidate`（见上）。
 2. **全量测试**：`scripts/run_tests.sh -j 8`，记录文件数、通过、失败、跳过、耗时和首次失败后重试通过的文件。
 3. **基线对照**：在一个独立的纯官方标签副本里（`git clone --shared ~/Projects/hermes-agent <临时目录>` 后 checkout 标签，用同一个 `HERMES_RUNTIME_DIR`/`HERMES_HOME` 装环境），用同样的入口复跑全量里所有失败的文件，按测试标识比较：
    - 共同失败：官方本身的失败或本机环境问题，不算定制回归；

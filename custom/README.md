@@ -1,8 +1,8 @@
 # birderyu/hermes-agent 个人 fork
 
-本目录是 `custom` 分支的说明书和台账。`custom` 分支就是 Mac mini 上实际运行的 Hermes Agent：官方正式发行版，加上少量个人补丁和 Ollo 的服务端插件。这里记录这个 fork 怎么修改、怎么升级、怎么部署，以及每次修订的经过。维护 fork 只看这里。
+本目录是 `custom` 分支的说明书和台账。`custom` 分支就是 Mac mini 上实际运行的 Hermes Agent：官方正式发行版，加上少量个人补丁。这里记录这个 fork 怎么修改、怎么升级、怎么部署，以及每次修订的经过。维护 fork 只看这里。
 
-目录和分支同名，沿用下游在源码里用自己名字建目录的惯例（例如 Debian 的 `debian/`）。只在 `custom` 分支上存在的说明、补丁清单和修订记录都放在这里；插件源码另放在 `hermes-plugins/`。2026-10-11 之前这个目录叫 `fork/`。
+目录和分支同名，沿用下游在源码里用自己名字建目录的惯例（例如 Debian 的 `debian/`）。只在 `custom` 分支上存在的说明、补丁清单和修订记录都放在这里；Ollo 的服务端代码 2026-10-20 起在 Ollo 仓库的 `hermes/`。2026-10-11 之前这个目录叫 `fork/`。
 
 官方仓库：[NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)。仓库根目录的 `README.md`、`AGENTS.md` 等是官方文件，不在这里改。
 
@@ -10,8 +10,8 @@
 
 | 项目 | 值 |
 | --- | --- |
-| 官方基线 `main` | `v0.22.1`（`297552a9d6`，2026-10-15 发布；2026-10-15 升级，部署待 ollo-bridge 适配） |
-| `custom` | `main` + 2 个 Hermes 补丁（cron）、Ollo 插件、维护文档，见 [补丁清单](patches.md) |
+| 官方基线 `main` | `v0.22.1`（`297552a9d6`，2026-10-15 发布；当天升级并部署） |
+| `custom` | `main` + 2 个 Hermes 补丁（cron）和维护文档；Ollo 插件 2026-10-20 移出，相关提交待下次变基处理，见 [补丁清单](patches.md) |
 | 运行版本 | 以 `hermes --version` 为准，部署经过见 [记录](records/README.md) |
 | 开发副本 | `~/Projects/hermes-agent`（独立 clone） |
 | 运行目录 | `~/.hermes/hermes-agent`（只部署） |
@@ -24,8 +24,8 @@
 | [deploy.md](deploy.md) | 部署到 Mac mini：运行环境布局、步骤、验证、回滚 |
 | [patches.md](patches.md) | 现行补丁与已移除补丁：为什么、上游状态、何时移除 |
 | [records/](records/README.md) | 修订记录 |
-| [Ollo GTD 正式切换方案](records/2026-10-14-ollo-gtd-production-switch.md) | 待执行：真实任务/清单切换、离线 plan/apply/rollback、授权节点、验证与回滚 |
-| [../hermes-plugins/](../hermes-plugins/README.md) | Ollo 服务端插件源码 |
+| [Ollo GTD 正式切换方案](records/2026-10-14-ollo-gtd-production-switch.md) | 2026-10-14 已执行：真实任务/清单切换、离线 plan/apply/rollback、授权节点、验证与回滚 |
+| Ollo 仓库 `hermes/` | Ollo 服务端代码（ollo-bridge、日历助手、采集脚本、GTD 技能），以及检查脚本 `hermes/scripts/check.sh` 和部署工具 `hermes/deploy/` |
 
 ## 规则
 

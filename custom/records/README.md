@@ -29,5 +29,6 @@
 | 2026-10-15 | [Ollo bridge 适配 session authority](2026-10-15-ollo-bridge-session-authority.md) | canonical 与 legacy 可信回合身份；复核收窄全局 hook 拦截、GET 失败保留原响应；沙箱外插件 539 过、核心 118 过；随 v0.22.1 部署 |
 | 2026-10-15 | [Ollo bridge 换清单改用 AppleScript move](2026-10-15-ollo-bridge-applescript-move.md) | 沙箱外插件 553 项、helper 自检通过；未部署，部署后需在 Mac mini 授予自动化权限 |
 | 2026-10-16 | [G4 GTD v2 Hermes 开发候选](2026-10-16-gtd-v2-hermes.md) | 全日历/完成项/计划/位置采集、日账gate、紧凑上下文、三份技能提示词候选；helper自检与9份卡片schema通过，Python沙箱阻断；两处G1联调依赖，未部署 |
+| 2026-10-20 | [Ollo 服务端代码移到 Ollo 仓库](2026-10-20-ollo-code-to-ollo-repo.md) | 删除 `hermes-plugins/`（`bcc45f9101`），fork 只剩 2 个 cron 补丁；Ollo 仓库 `hermes/` 逐字节核对、兼容检查通过；插件提交待下次变基处理 |
 
 新记录的文件名用 `YYYY-MM-DD-<主题>.md`，写清：做了什么、涉及哪些提交、冲突怎么解决、测试结果（含与官方基线的对照）、部署与验证、没验证到的地方。
