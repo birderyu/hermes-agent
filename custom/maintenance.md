@@ -92,7 +92,6 @@ git range-diff "backup/main-pre-$TAG-$D..backup/custom-pre-$TAG-$D" main..custom
 - 变基冲突：先 `git rebase --abort`，保存冲突差异、读懂上游现在的代码，再重放；按补丁原意合并，不把上游新行为改回去。
 - 每个 `!` 的 range-diff 都要审阅并写进记录。
 - 上游已修好的补丁在这一步 drop，并在 [补丁清单](patches.md) 移到「已移除」。
-- 已移出的 Ollo 插件提交按 [补丁清单](patches.md#已移出的-ollo-插件提交) 处理（处理完一次，以后的变基就不再有这一项）。
 
 然后按「开发环境」重新 `setup-hermes.sh --runtime-only --test-environment`，跑测试（下一节）。再在升级副本上跑 Ollo 仓库的检查（升级副本的提交号必然和 `compat.toml` 不同，所以用 `--candidate`，它改为逐项检查 ollo-bridge 依赖的宿主符号）：
 
@@ -101,7 +100,7 @@ cd ~/Projects/ollo
 bash hermes/scripts/check.sh --candidate --hermes-source <升级副本> --python <升级副本测试环境的 python>
 ```
 
-两者都通过后推送；推送后在 Ollo 仓库把 `hermes/compat.toml` 的 `fork_commit` 改成推送后的 `custom`，用默认模式再跑一次 `check.sh`：
+两者都通过后推送：
 
 
 ```bash
@@ -110,7 +109,11 @@ test "$(git rev-parse origin/custom)" = "$OLD_ORIGIN_CUSTOM"   # 远端没被别
 git push --atomic --force-with-lease=refs/heads/custom:$OLD_ORIGIN_CUSTOM origin main:main custom:custom
 ```
 
-只有变基后的 `custom` 用 `--force-with-lease`，并且带精确旧 SHA；不用普通 `--force`。推送后按 [部署](deploy.md) 上线，最后写升级记录。
+只有变基后的 `custom` 用 `--force-with-lease`，并且带精确旧 SHA；不用普通 `--force`。
+
+推送后，在 Ollo 仓库把 `hermes/compat.toml` 的 `fork_commit` 改成推送后 `custom` 上最后一个改动 Hermes 本体的提交，用默认模式再跑一次 `check.sh`。默认模式要求 `fork_commit` 是 HEAD 的祖先（相同也算），两者之间以及工作树里 `custom/` 以外没有改动；以后只改 `custom/` 的提交不用更新 `compat.toml`。本体有变化、提交不存在或变基后不再是祖先，默认模式都会失败（退出 2），所以升级时先用 `--candidate`。
+
+然后按 [部署](deploy.md) 上线，最后写升级记录。
 
 ## 测试与基线对照
 
