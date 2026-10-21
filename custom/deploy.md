@@ -97,6 +97,31 @@ hermes gateway restart
 
 然后核对 `gateway_state.json` 的 `code_sha`，并检查 fork 上的 `main` 有没有被推走（`git ls-remote origin refs/heads/main`），被推走就从开发副本用 `--force-with-lease` 推回基线。
 
+#### 更新器把变基后的升级当成降级时
+
+报错是 `✗ Refusing to move this install to …: that release predates the gateway runtime these session stores now use. Downgrading is unsupported.`，更新器什么都没动。检查在 `hermes_cli/update_downgrade_guard.py`，三个条件同时成立才拒绝：
+
+1. 目标提交不是运行目录当前 HEAD 的后代。变基后的 `custom` 永远满足这一条。
+2. 目标的 `hermes_state*.py` 里没有 `CREATE TABLE IF NOT EXISTS session_admissions`，也就是目标版本没有「网关运行时」的账本表。
+3. 某个档案的 `state.db` 里已有 `session_admissions` 或 `worker_executions` 记录。
+
+官方用户沿着标签向前更新时第 1 条不成立，所以不会被拦。2026-10-20 从 v0.22.1（官方错误构建，带了运行时）升 v0.22.2（撤回了运行时）时碰上过，见 [v0.22.2 升级记录](records/2026-10-20-v0.22.2.md)。处理：
+
+- 先判断代价：在不认识账本表的版本上，有账本记录的会话删不掉，也清理不了（`ON DELETE RESTRICT`）。官方升级同样有这个代价（v0.22.2 发行说明的已知问题），要用户确认能接受。不能接受就先留在当前版本，等目标版本带回运行时（之后的发行版），那时第 2 条不成立，自然放行。
+- 用户同意后手工对齐，结果等同官方的向前更新：
+
+```bash
+hermes gateway stop                                   # 确认 launchd 已卸载、没有进行中的任务
+git -C ~/.hermes/hermes-agent status --short          # 必须干净；回退分支已在备份步骤建好
+git -C ~/.hermes/hermes-agent reset --hard origin/custom
+GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf GIT_CONFIG_VALUE_0=git@github.com: \
+hermes update --branch custom --yes                   # 已是目标提交：只补后续步骤，会自己重启网关
+hermes gateway start                                  # 仅当更新器没有把网关拉起来时
+```
+
+  依赖锁文件变了的话再补一次 `hermes pm install`。之后照第 4 步验证，并让 Ollo 真发一条消息。
+- 更新器在报错里建议的「恢复升级前的 `state.db` 快照」会丢掉之后的所有会话，除非用户明确要求，不走这条路。
+
 只改 `custom/` 文档的提交不需要部署，运行目录的 HEAD 可以落后 `origin/custom` 若干个纯文档提交。
 
 Ollo 的服务端代码不在本仓库，也不随 `hermes update` 部署：在 Ollo 仓库按 `hermes/deploy/README.md` 用 `python3 hermes/deploy/manage.py {verify|backup|sync|rollback}` 部署插件（白名单同步，测试和文档不进 `~/.hermes`），日历助手、采集脚本、技能和任务提示词各有安装步骤。插件的数据库在 `~/.hermes/plugin-data/`，不随插件替换。插件改了要 `hermes gateway restart`，重启后核对 LaunchAgent 仍经 `osascript` 启动。
