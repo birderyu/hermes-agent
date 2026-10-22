@@ -2,14 +2,14 @@
 
 `custom` 相对官方基线 `main` 的全部改动。每次变基后更新提交号；补丁移除时移到「已移除」，不要直接删掉。
 
-基线：官方 `v0.22.2`（`d923a5eb48`，2026-10-20 升级）。`git log --oneline main..custom` 应与下表一致。
+基线：官方 `v0.22.4`（`4d04303818`，2026-10-23 升级）。`git log --oneline main..custom` 应与下表一致。
 
 ## 现行补丁
 
 | 提交 | 内容 | 为什么还需要 | 上游状态 | 什么时候可以移除 |
 | --- | --- | --- | --- | --- |
-| `431930e7b6` fix(cron): pass execution_id to live-adapter delivery metadata | 定时任务走 live adapter 投递时，把执行 ID 放进路由元数据（`cron/scheduler_delivery.py` 的 `_live_route_metadata` 普通分支） | Ollo 仓库 `hermes/ollo-bridge/reports.py` 的 `delivery()` 从元数据取执行 ID，`execution.py` 的 `report_identity()` 据此查宿主执行账本；Ollo 网关按它幂等 | v0.22.2 仍没有（一行，适合提 PR） | 上游等价透传，或 ollo-bridge 下线 |
-| `e324413bc5` fix(cron): idempotent live delivery retry for single-target adapters | 声明 `idempotent_delivery=True` 的 live adapter 投递失败、发送进程死亡或超时后，按同一执行有界重放 | Ollo 仓库 `hermes/ollo-bridge/__init__.py` 的 `BridgeAdapter` 声明可重试，`execution.py` 读投递队列快照；Ollo 报告「至少一次且不重复」靠它 | v0.22.2 没有，见下 | 见下 |
+| `b98263471a` fix(cron): pass execution_id to live-adapter delivery metadata | 定时任务走 live adapter 投递时，把执行 ID 放进路由元数据（`cron/scheduler_delivery.py` 的 `_live_route_metadata` 普通分支） | Ollo 仓库 `hermes/ollo-bridge/reports.py` 的 `delivery()` 从元数据取执行 ID，`execution.py` 的 `report_identity()` 据此查宿主执行账本；Ollo 网关按它幂等 | v0.22.4 仍没有（一行，适合提 PR） | 上游等价透传，或 ollo-bridge 下线 |
+| `10fbfafb32` fix(cron): idempotent live delivery retry for single-target adapters | 声明 `idempotent_delivery=True` 的 live adapter 投递失败、发送进程死亡或超时后，按同一执行有界重放 | Ollo 仓库 `hermes/ollo-bridge/__init__.py` 的 `BridgeAdapter` 声明可重试，`execution.py` 读投递队列快照；Ollo 报告「至少一次且不重复」靠它 | v0.22.4 只部分覆盖，见下 | 见下 |
 | 25 个 `docs(fork)`、`docs(custom)` 提交，及本表所在提交 | `custom/` 维护文档与修订记录（2026-10-11 由 `fork/` 改名）。其中 7 个 `docs(custom): record ollo-bridge …` 是原来的 Ollo 插件提交剥掉插件部分后留下的记录 | 本 fork 的修订方式与记录 | — | — |
 
 两个 cron 补丁依赖的宿主符号清单在 Ollo 仓库 `hermes/scripts/check_host.py`，兼容的 fork 提交记在 `hermes/compat.toml`。发行版升级时要在升级副本上跑 Ollo 仓库的检查脚本，见 [维护方式](maintenance.md#发行版升级)。
@@ -18,7 +18,7 @@
 
 Ollo 的服务端代码（ollo-bridge、日历助手 ollo-eventkit、采集脚本、GTD 技能和任务提示词）2026-10-20 起在 Ollo 仓库的 `hermes/` 维护，本 fork 不再有插件目录，经过见 [迁移记录](records/2026-10-20-ollo-code-to-ollo-repo.md)。原来的 16 个插件提交已在同日升级到 v0.22.2 的变基中清理，见「已移除」。
 
-### 投递重试补丁（`e324413bc5`）
+### 投递重试补丁（`10fbfafb32`）
 
 **为什么需要：** 原 `cron/delivery_queue.py::_finish` 将错误置为终态 `failed`；`claim_next` 只选 `pending`，因此 adapter 返回失败后不会再发送。`recover_abandoned` 将死进程已领取发送置为 `unknown`，同样不重试。这是原 at-most-once 策略，不是“持久队列自然会重试”。此外 `cron/scheduler_delivery.py::_deliver_result` 原来只为 detached worker 入队，`cron/scheduler.py::_launch_external_cron_worker` 在非 systemd 拓扑（包括当前 macOS 部署方式）走进程内路径，单改队列不覆盖这个入口。
 
@@ -28,7 +28,7 @@ Ollo 的服务端代码（ollo-bridge、日历助手 ollo-eventkit、采集脚�
 
 **快照生命周期：** pending/delivering 保留完整载荷供发送与重试；adapter 成功返回后 `_finish` 调用 `_prune_terminal_unlocked` 清空终态 job_json/content，仅保留结果元数据和幂等墓碑。这是上游既有策略（源自 `29e5172487`），`get_status` 不会隐藏活动行快照。第六轮插件测试误在成功 drain 后要求完整快照，已修正为在 HTTP 返回 201 前采集真实行，保留逐字相等断言，并补成功清理/终态不再发送断言；生产路径和核心补丁未改。
 
-**上游状态（2026-10-20 对 v0.22.2 的核对）：** 没有。v0.22.2 的 `cron/delivery_queue.py` 与 v0.21.6 逐字节相同：adapter 返回失败后置 `failed` 不再重试，已领取的行在发送进程死亡后置 `unknown` 不重放；`scheduler_delivery.py` 只有写法整理，已开始的发送超时仍按「假定已送达」处理；也没有 opt-in 的认证、次数与退避。v0.22.1 里的终态回写（`settle_quietly`、`cron/delivery_outcome.py`）属于官方撤回的未发布改动，v0.22.2 里不存在，所以队列部分用回 v0.21.6 时的原版补丁。见 [v0.22.2 升级记录](records/2026-10-20-v0.22.2.md)。
+**上游状态（2026-10-23 对 v0.22.4 的核对）：** 只部分覆盖，不等价。v0.22.4 的 `cron/delivery_queue.py` 与 v0.22.1 逐字节相同，`cron/delivery_outcome.py` 也回来了：普通 agent cron 在发送前按执行 ID 持久入队，有终态回写；但 adapter 返回失败后仍置 `failed` 不再重试，已领取的行在发送进程死亡后仍置 `unknown` 不重放，已开始的发送超时仍按「假定已送达」处理，也没有 opt-in 的认证、次数与退避。所以队列部分用回 v0.22.1 时的版本（`recover_abandoned` 同时保留上游的 `fenced`/`settle_quietly` 回写和本补丁的认证重试恢复）。v0.22.2 一度撤回了这批上游改动，见 [v0.22.2 升级记录](records/2026-10-20-v0.22.2.md)。
 
 **什么时候可以移除：** 上游提供等价的幂等 adapter 声明、进程内持久入队、失败/死进程重放、超时不假成功能力时，重接插件后整体移除；或所有声明此能力的消费者下线。移除/回滚前先处理原队列里的 pending/in-flight 行，不能静默丢弃或无条件重放。
 

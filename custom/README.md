@@ -10,7 +10,7 @@
 
 | 项目 | 值 |
 | --- | --- |
-| 官方基线 `main` | `v0.22.2`（`d923a5eb48`，2026-10-15 发布；2026-10-20 升级） |
+| 官方基线 `main` | `v0.22.4`（`4d04303818`，2026-10-21 发布；2026-10-23 升级） |
 | `custom` | `main` + 2 个 Hermes 补丁（cron）和维护文档，见 [补丁清单](patches.md)；Ollo 服务端代码在 Ollo 仓库的 `hermes/` |
 | 运行版本 | 以 `hermes --version` 为准，部署经过见 [记录](records/README.md) |
 | 开发副本 | `~/Projects/hermes-agent`（独立 clone） |
