@@ -136,7 +136,7 @@ Ollo 的服务端代码不在本仓库，也不随 `hermes update` 部署：在 
 | 服务 | `launchctl print gui/$(id -u)/ai.hermes.gateway`；`ps` 看网关进程 | running；v0.21.6 起 LaunchAgent 经 `/usr/bin/osascript` 启动 `~/.hermes/hermes-agent/.hermes/bin/hermes`，网关进程的解释器在 `~/.hermes/tools/python-*` |
 | 平台 | `gateway_state.json`（看各平台的写入者 PID 是否为当前进程）、网关日志的 `photon connected` | Photon、API server、`ollo` connected。sidecar 的 `/healthz`、`/probe` 需要认证，`/probe` 返回 inconclusive 也不能算健康证明 |
 | 插件 | `hermes plugins list`、网关日志 | `ollo-*` 已加载，无报错 |
-| 定时任务 | `hermes cron list` | 全部 enabled，下次运行时间正常 |
+| 定时任务 | `hermes cron list` | 2026-10-25 起 4 个 GTD 任务是暂停状态（见 [补丁清单](patches.md#gtd-定时任务暂停2026-10-25-起)），部署前后状态不变；其他任务 enabled、下次运行时间正常 |
 | Ollo | Ollo 仓库 `server/deploy/install.py verify`（本机、公网）。**Hermes 版本升级后必须加 `--send "…"` 真发一条**，只读的 verify 测不到写入路径（2026-10-15 升级后 `/v1/runs` 全部 409，只读核对没发现，见下） | 能力、会话、历史正常；发送时事件到 `run.completed`，回复出现在历史 |
 | 日志 | 重启后的 `~/.hermes/logs/gateway.log`、`gateway.error.log`、`errors.log`（按行首时间戳筛选） | 没有新的 ERROR、Traceback |
 | 日历与提醒事项 | 下一次 GTD 定时任务的输出，或日志里的 `full access is not granted` | 能读到。读不到时，在 Mac mini 上给 `osascript` 授权（v0.21.6 起网关由它启动）：解锁屏幕后在 Ollo App 里发「今日安排」，弹窗里允许提醒事项、日历选「完全访问」；没有弹窗就到「系统设置 → 隐私与安全性 → 提醒事项 / 日历」打开 `osascript`，列表里没有它时先在终端 `tccutil reset Reminders com.apple.osascript`、`tccutil reset Calendar com.apple.osascript` 再触发一次。授权给 `osascript` 意味着用它运行的其他脚本也能读日历和提醒事项 |

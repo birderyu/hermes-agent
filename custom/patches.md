@@ -57,6 +57,14 @@ ollo-bridge 下线，或者 bridge 不再检查时区之后，才可以删掉。
 
 v0.21.6 起 `sessions.auto_prune` 默认开启，网关会删除已结束且 90 天未活动的会话（置顶和进行中的不删）。用户要全部保留，`~/.hermes/config.yaml` 加了 `sessions.auto_prune: false`。当时最早的会话是 07-18，还没有被删过的。修改前的配置备份在 `~/.hermes/backups/pre-v0.22.1-20261015/config.yaml.pre-auto-prune`。只改了主档案，其他档案（care、gold、wiki 等）仍是默认。
 
+### GTD 定时任务：暂停（2026-10-25 起）
+
+Ollo 封版（先做好 iPhone 和 Mac 的基本对话，之后每个功能单独开分支）时，用户决定只保留对话里的 GTD 功能（记、改、查、加日历的 MCP 工具和「今天」面板），暂停定时报告。2026-10-25 21:33 停网关期间执行 `hermes cron pause`，暂停了 4 个任务：`d83281b75902` 今日安排-工作日、`8211bb91402a` 今日安排-周末、`12d6987e974e` 清理收件箱-工作日、`f9a5dd70ea34` 每周回顾-周日。只暂停不删除，`jobs.json` 里只有这 4 个任务的 `enabled`、`state`、`paused_at` 变了，提示词和投递设置都保留；`config.yaml` 未改。停机前的副本在 `~/.ollo-hermes-backups/freeze-config-20261025-213327/`。
+
+恢复时每个任务单独执行，并且**一定要用 `--at` 指定下一次运行时间**：`resume_job` 会把暂停期间已经过去的 `next_run_at` 原样留作到期，下一次调度扫描会立刻补跑一次（或记一条跳过），可能发出一份过期的报告。例如 `hermes cron resume d83281b75902 --at 2026-11-02T08:00:00+08:00`。要在停网关时操作。
+
+暂停期间两个 cron 补丁没有在跑的使用方，但 ollo-bridge 仍声明 `idempotent_delivery`，任务也只是暂停，所以补丁保留；定时报告长期不恢复的话，下次升级时按它们的退出条件再评估。
+
 ## 已移除
 
 | 原提交（最后的 SHA） | 内容 | 移除日期 | 原因 |
